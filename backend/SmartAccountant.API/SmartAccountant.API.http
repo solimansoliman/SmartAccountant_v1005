@@ -1,0 +1,6 @@
+@SmartAccountant.API_HostAddress = http://localhost:5000
+
+GET {{SmartAccountant.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -1,0 +1,5 @@
+{
+  "name": "Al-Muhasib (المحاسب الذكي)",
+  "description": "A comprehensive accounting web app for managing invoices, customers, installments, expenses, and financial reports with local storage persistence.",
+  "requestFramePermissions": []
+}
