@@ -787,7 +787,7 @@ const Customers: React.FC = () => {
                       </div>
                     </div>
                     
-                    {/* الصف الثاني: بيانات العميل + الملخص المالي */}
+                    {/* الصف v1005: بيانات العميل + الملخص المالي */}
                     <div className="flex items-center justify-between p-2 print:p-1.5 text-sm print:text-[10px]">
                       <div>
                         <span className="text-slate-500">العميل: </span>
