@@ -1,0 +1,38 @@
+database/
+├── schema.sql                    ← هيكل قاعدة البيانات (الجداول)
+├── SmartAccountant_BaseSetup.sql ← البيانات الأساسية (الإعدادات، العملات، إلخ)
+└── SmartAccountant_TestData.sql  ← بيانات تجريبية (اختياري)
+
+
+
+================================
+
+
+ترتيب التنفيذ على السيرفر:
+schema.sql - أولاً
+SmartAccountant_BaseSetup.sql - ثانياً
+SmartAccountant_TestData.sql - (اختياري للاختبار)
+
+
+
+=================================
+
+DEPLOY/ (26.92 MB)
+├── 📁 backend/      (103 files) - ملفات الـ API
+│   ├── SmartAccountant.API.exe
+│   ├── SmartAccountant.API.dll
+│   ├── web.config
+│   ├── appsettings.Production.json ⚠️
+│   └── ...
+│
+├── 📁 frontend/     (4 files) - ملفات الواجهة
+│   ├── index.html
+│   └── assets/
+│
+├── 📁 database/     (15 files) - سكربتات قاعدة البيانات
+│   ├── schema.sql
+│   ├── SmartAccountant_BaseSetup.sql
+│   ├── SmartAccountant_TestData.sql
+│   └── ...
+│
+└── 📄 README_DEPLOY.md  ← دليل النشر الكامل
