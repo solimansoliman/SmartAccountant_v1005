@@ -217,3 +217,15 @@ C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\obj\Debug\net10.
 C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\Microsoft.AspNetCore.Authentication.JwtBearer.dll
 C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\appsettings.Local.json
 C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\appsettings.Production.json
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\BuildHost-net472\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.exe.config
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\BuildHost-netcore\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll.config
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\web.config
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\appsettings.Development.json
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\appsettings.json
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\appsettings.Local.json
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\appsettings.Production.json
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\BuildHost-netcore\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.deps.json
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\BuildHost-netcore\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.runtimeconfig.json
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\SmartAccountant.API.deps.json
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\SmartAccountant.API.runtimeconfig.json
+C:\MO\ai_proj\SmartAccountant_v1005\backend\SmartAccountant.API\bin\Debug\net10.0\publish\SmartAccountant.API.staticwebassets.endpoints.json

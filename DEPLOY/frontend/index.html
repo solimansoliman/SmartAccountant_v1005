@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>المحاسب الذكي - الإصدار v1005</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Tajawal', 'sans-serif'],
+            },
+            colors: {
+              primary: '#1e40af', // Deeper blue
+              secondary: '#475569',
+              success: '#059669',
+              danger: '#dc2626',
+              warning: '#d97706',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: #f1f5f9; }
+      .dark ::-webkit-scrollbar-track { background: #1e293b; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      .dark ::-webkit-scrollbar-thumb { background: #475569; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+      /* Print Specific Styles */
+      @media print {
+        @page { size: A4; margin: 8mm; }
+        body { background-color: white !important; font-size: 11pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        
+        /* إخفاء الأزرار والعناصر غير المطلوبة */
+        .no-print, .print\\:hidden { display: none !important; }
+        button { display: none !important; visibility: hidden !important; }
+        [class*="hover:"] { pointer-events: none !important; }
+        
+        .print-only { display: block !important; }
+        .print-break-inside { break-inside: avoid; }
+        .shadow-sm, .shadow-lg { box-shadow: none !important; }
+        .bg-white { background-color: white !important; }
+        
+        /* إخفاء أعمدة الأدوات */
+        .no-print, th.no-print, td.no-print { display: none !important; }
+        
+        /* جداول بحدود رمادية */
+        table { width: 100% !important; border-collapse: collapse; border: 1px solid #999 !important; }
+        thead th { 
+          background-color: transparent !important; 
+          color: #000 !important; 
+          font-weight: bold; 
+          border: 1px solid #999 !important;
+          padding: 4px 6px !important;
+        }
+        tbody td { 
+          border: 1px solid #999 !important;
+          padding: 3px 6px !important;
+        }
+        tfoot td {
+          border: 1px solid #999 !important;
+          font-weight: bold;
+          padding: 4px 6px !important;
+        }
+        
+        /* حدود رفيعة للأقسام */
+        .print\\:border, .print\\:border-b, .print\\:border-t {
+          border-width: 0.5pt !important;
+          border-color: #ccc !important;
+        }
+        .print\\:border-gray-200, .print\\:border-gray-300 {
+          border-color: #ddd !important;
+        }
+        
+        /* Reset Dark Mode for Print */
+        .dark body, .dark .bg-slate-900 { background-color: white !important; color: black !important; }
+        .dark * { color: black !important; }
+      }
+    </style>
+
+<link rel="stylesheet" href="/index.css">
+  <script type="importmap">
+{
+  "imports": {
+    "react-router-dom": "https://aistudiocdn.com/react-router-dom@^7.10.1",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/assets/index-DD4wQI6T.js"></script>
+</head>
+  <body class="bg-slate-50 text-slate-900 font-sans antialiased dark:bg-slate-900 dark:text-slate-100 transition-colors duration-300">
+    <div id="root"></div>
+</body>
+</html>
