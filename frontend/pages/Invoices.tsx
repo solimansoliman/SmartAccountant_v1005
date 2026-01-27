@@ -1216,60 +1216,89 @@ const Invoices: React.FC = () => {
           </div>
         </div>
       ) : (
-        /* Create/Edit Invoice View */
+        /* Create/Edit Invoice View - Enhanced Design */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in slide-in-from-left-4 duration-300">
           
           {/* Right Column: Invoice Form */}
           <div className="lg:col-span-2 space-y-6">
-            <div className="bg-white dark:bg-slate-800/90 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                    {editingInvoiceId ? <Edit2 size={20} className="text-blue-600"/> : <Plus size={20} className="text-emerald-600"/>}
-                    {editingInvoiceId ? 'تعديل الفاتورة' : 'إنشاء فاتورة جديدة'}
-                </h3>
-                <div className="flex gap-2">
-                    {/* Only show 'Save' if not editing (edit saves via modal confirm) */}
-                    {!editingInvoiceId && (
-                        <button onClick={handleSaveRequest} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-bold shadow-lg shadow-emerald-100 dark:shadow-none transition-colors">
-                            <Save size={18} /> حفظ الفاتورة
-                        </button>
-                    )}
-                    {editingInvoiceId && (
-                        <button onClick={handleSaveRequest} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 font-bold shadow-lg shadow-blue-100 dark:shadow-none transition-colors">
-                            <Save size={18} /> حفظ التعديلات
-                        </button>
-                    )}
-                    <button onClick={handleCancelInvoice} className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-4 py-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
-                        إلغاء
+            <div className="bg-white dark:bg-slate-800/95 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm overflow-hidden">
+              {/* Header */}
+              <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2.5 rounded-xl ${editingInvoiceId 
+                      ? 'bg-blue-100 dark:bg-blue-900/30' 
+                      : 'bg-emerald-100 dark:bg-emerald-900/30'}`}>
+                      {editingInvoiceId 
+                        ? <Edit2 size={24} className="text-blue-600 dark:text-blue-400"/> 
+                        : <FileText size={24} className="text-emerald-600 dark:text-emerald-400"/>}
+                    </div>
+                    <div>
+                      <h3 className={`font-bold text-xl ${editingInvoiceId 
+                        ? 'text-blue-600 dark:text-blue-400' 
+                        : 'text-emerald-600 dark:text-emerald-400'}`}>
+                        {editingInvoiceId ? 'تعديل الفاتورة' : 'إنشاء فاتورة جديدة'}
+                      </h3>
+                      <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
+                        {editingInvoiceId ? 'قم بتحديث بيانات الفاتورة' : 'أنشئ فاتورة مبيعات جديدة'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={handleSaveRequest} 
+                      className={`px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-lg transition-all transform hover:-translate-y-0.5 active:translate-y-0 ${
+                        editingInvoiceId 
+                          ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/25' 
+                          : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-emerald-500/25'
+                      }`}
+                    >
+                      <Save size={18} /> {editingInvoiceId ? 'حفظ التعديلات' : 'حفظ الفاتورة'}
                     </button>
+                    <button 
+                      onClick={handleCancelInvoice} 
+                      className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-4 py-2.5 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-all flex items-center gap-2"
+                    >
+                      <XCircle size={18} /> إلغاء
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">العميل</label>
-                  <SearchableSelect 
-                    options={customers.map(c => ({ id: String(c.id), label: c.name, subLabel: c.phone || '' }))}
-                    value={selectedCustomerId}
-                    onChange={setSelectedCustomerId}
-                    placeholder="اختر العميل..."
-                    disabled={isLoading}
-                  />
+              {/* Form Content */}
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div className="group">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                      <User size={16} className="text-blue-500" />
+                      العميل
+                    </label>
+                    <SearchableSelect 
+                      options={customers.map(c => ({ id: String(c.id), label: c.name, subLabel: c.phone || '' }))}
+                      value={selectedCustomerId}
+                      onChange={setSelectedCustomerId}
+                      placeholder="اختر العميل..."
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <div className="group">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                      <Calendar size={16} className="text-amber-500" />
+                      تاريخ الفاتورة
+                    </label>
+                    <DateInput 
+                      className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl p-2.5 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white transition-all"
+                      value={date}
+                      onChange={setDate}
+                      disabled={isLoading}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">تاريخ الفاتورة</label>
-                  <DateInput 
-                    className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-2.5 outline-none focus:border-primary bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
-                    value={date}
-                    onChange={setDate}
-                    disabled={isLoading}
-                  />
-                </div>
-              </div>
 
               {/* Add Item Section */}
-              <div className={`bg-slate-50 dark:bg-slate-700/50 p-4 rounded-xl border ${editingItemId ? 'border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/10' : 'border-slate-200 dark:border-slate-600'} mb-6`}>
+              <div className={`bg-slate-50 dark:bg-slate-700/50 p-4 rounded-xl border-2 ${editingItemId ? 'border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/10' : 'border-slate-200 dark:border-slate-600'} mb-6`}>
                  <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${editingItemId ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                     <Package size={16} className={editingItemId ? 'text-amber-500' : 'text-purple-500'} />
                      {editingItemId ? 'تعديل الصنف المحدد' : 'إضافة أصناف للفاتورة'}
                  </h4>
                  
@@ -1368,6 +1397,7 @@ const Invoices: React.FC = () => {
                     )}
                   </tbody>
                 </table>
+              </div>
               </div>
             </div>
           </div>

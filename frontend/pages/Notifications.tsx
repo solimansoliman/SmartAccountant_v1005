@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Bell, Check, CheckCheck, Trash2, Loader2, AlertTriangle, Info, CheckCircle, AlertCircle, Clock, X, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Bell, Check, CheckCheck, Trash2, Loader2, AlertTriangle, Info, CheckCircle, AlertCircle, Clock, X, RefreshCw, Search, Calendar } from 'lucide-react';
 import { notificationsApi, ApiNotification } from '../services/apiService';
 import { useNotification } from '../context/NotificationContext';
 import { formatDateTime, formatDate as formatDateSimple } from '../services/dateService';
@@ -13,6 +13,18 @@ const Notifications: React.FC = () => {
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // تحديد فترة سنة كقيمة افتراضية
+  const getDefaultDateFrom = () => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.toISOString().split('T')[0];
+  };
+  const getDefaultDateTo = () => new Date().toISOString().split('T')[0];
+  
+  const [dateFrom, setDateFrom] = useState(getDefaultDateFrom);
+  const [dateTo, setDateTo] = useState(getDefaultDateTo);
   
   // ==================== صلاحيات الصفحة ====================
   const pagePerms = usePagePermission('notifications');
@@ -130,6 +142,31 @@ const Notifications: React.FC = () => {
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
+  // تصفية الإشعارات حسب البحث والتاريخ
+  const filteredNotifications = useMemo(() => {
+    return notifications.filter(n => {
+      // تصفية بالبحث
+      const matchesSearch = !searchQuery || 
+        n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        n.message.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      // تصفية بالتاريخ
+      const notifDate = new Date(n.createdAt);
+      const matchesDateFrom = !dateFrom || notifDate >= new Date(dateFrom);
+      const matchesDateTo = !dateTo || notifDate <= new Date(dateTo + 'T23:59:59');
+      
+      return matchesSearch && matchesDateFrom && matchesDateTo;
+    });
+  }, [notifications, searchQuery, dateFrom, dateTo]);
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setDateFrom(getDefaultDateFrom());
+    setDateTo(getDefaultDateTo());
+  };
+
+  const hasFilters = !!searchQuery;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -215,18 +252,76 @@ const Notifications: React.FC = () => {
         </button>
       </div>
 
+      {/* Search and Date Filter */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+        <div className="flex flex-col sm:flex-row gap-3">
+          {/* Search */}
+          <div className="relative flex-1">
+            <Search size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="بحث في الإشعارات..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pr-10 pl-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:border-blue-500 outline-none"
+            />
+          </div>
+          
+          {/* Date From */}
+          <div className="relative">
+            <Calendar size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              className="pr-10 pl-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:border-blue-500 outline-none text-sm"
+              title="من تاريخ"
+            />
+          </div>
+          
+          {/* Date To */}
+          <div className="relative">
+            <Calendar size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              className="pr-10 pl-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:border-blue-500 outline-none text-sm"
+              title="إلى تاريخ"
+            />
+          </div>
+          
+          {/* Clear Filters */}
+          {hasFilters && (
+            <button
+              onClick={clearFilters}
+              className="flex items-center gap-1 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+            >
+              <X size={16} />
+              مسح
+            </button>
+          )}
+        </div>
+        
+        {hasFilters && (
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+            عرض {filteredNotifications.length} من {notifications.length} إشعار
+          </p>
+        )}
+      </div>
+
       {/* Notifications List */}
       <div className="space-y-3">
-        {notifications.length === 0 ? (
+        {filteredNotifications.length === 0 ? (
           <div className="bg-white dark:bg-slate-800 rounded-xl p-12 text-center border border-slate-200 dark:border-slate-700">
             <Bell className="mx-auto mb-4 text-slate-300 dark:text-slate-600" size={48} />
             <h3 className="text-lg font-medium text-slate-600 dark:text-slate-400 mb-2">لا توجد إشعارات</h3>
             <p className="text-sm text-slate-400 dark:text-slate-500">
-              {filter === 'unread' ? 'تم قراءة جميع الإشعارات' : 'ستظهر الإشعارات الجديدة هنا'}
+              {hasFilters ? 'لا توجد نتائج للبحث' : filter === 'unread' ? 'تم قراءة جميع الإشعارات' : 'ستظهر الإشعارات الجديدة هنا'}
             </p>
           </div>
         ) : (
-          notifications.map(notification => (
+          filteredNotifications.map(notification => (
             <div
               key={notification.id}
               className={`rounded-xl border-2 p-4 transition-all hover:shadow-md ${getTypeBgColor(notification.type)} ${

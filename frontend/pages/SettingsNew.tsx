@@ -126,7 +126,7 @@ interface AccountFormData {
 const Settings: React.FC = () => {
   const { notify } = useNotification();
   const { user } = useAuth();
-  const { isDarkMode, toggleDarkMode, currency, setCurrency, availableCurrencies, addCurrency, permissions, togglePermission, defaultViewMode, setDefaultViewMode } = useSettings();
+  const { isDarkMode, toggleDarkMode, currency, setCurrency, availableCurrencies, addCurrency, permissions, togglePermission, defaultViewMode, setDefaultViewMode, dateFormat, setDateFormat, timeFormat, setTimeFormat, dateDisplayStyle, setDateDisplayStyle } = useSettings();
   
   const [activeTab, setActiveTab] = useState<TabType>('general');
   const [loading, setLoading] = useState(false);
@@ -3496,6 +3496,175 @@ const Settings: React.FC = () => {
                         الوضع الحالي: <span className="font-medium">{isDarkMode ? 'داكن' : 'فاتح'}</span>
                       </p>
                     </div>
+
+                    {/* Date Format Settings */}
+                    <div className="p-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
+                        <Calendar size={16} className="inline ml-1" />
+                        تنسيق التاريخ
+                      </label>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={async () => {
+                            setDateFormat('DD-MM-YYYY');
+                            try {
+                              await systemSettingsApi.update('dateFormat', 'DD-MM-YYYY', 'string');
+                              notify('تم تعيين تنسيق التاريخ ✓', 'success');
+                            } catch (err) {
+                              notify('فشل حفظ الإعداد!', 'error');
+                            }
+                          }}
+                          className={`flex items-center justify-between p-2 rounded-lg border-2 transition-all ${
+                            dateFormat === 'DD-MM-YYYY' 
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' 
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span className="font-medium">يوم-شهر-سنة</span>
+                          <span className="text-sm opacity-70">27-01-2026</span>
+                        </button>
+                        <button
+                          onClick={async () => {
+                            setDateFormat('MM-DD-YYYY');
+                            try {
+                              await systemSettingsApi.update('dateFormat', 'MM-DD-YYYY', 'string');
+                              notify('تم تعيين تنسيق التاريخ ✓', 'success');
+                            } catch (err) {
+                              notify('فشل حفظ الإعداد!', 'error');
+                            }
+                          }}
+                          className={`flex items-center justify-between p-2 rounded-lg border-2 transition-all ${
+                            dateFormat === 'MM-DD-YYYY' 
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' 
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span className="font-medium">شهر-يوم-سنة</span>
+                          <span className="text-sm opacity-70">01-27-2026</span>
+                        </button>
+                        <button
+                          onClick={async () => {
+                            setDateFormat('YYYY-MM-DD');
+                            try {
+                              await systemSettingsApi.update('dateFormat', 'YYYY-MM-DD', 'string');
+                              notify('تم تعيين تنسيق التاريخ ✓', 'success');
+                            } catch (err) {
+                              notify('فشل حفظ الإعداد!', 'error');
+                            }
+                          }}
+                          className={`flex items-center justify-between p-2 rounded-lg border-2 transition-all ${
+                            dateFormat === 'YYYY-MM-DD' 
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' 
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span className="font-medium">سنة-شهر-يوم</span>
+                          <span className="text-sm opacity-70">2026-01-27</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Time Format Settings */}
+                    <div className="p-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
+                        <Clock size={16} className="inline ml-1" />
+                        تنسيق الوقت
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            setTimeFormat('24h');
+                            try {
+                              await systemSettingsApi.update('timeFormat', '24h', 'string');
+                              notify('تم تعيين تنسيق الوقت ✓', 'success');
+                            } catch (err) {
+                              notify('فشل حفظ الإعداد!', 'error');
+                            }
+                          }}
+                          className={`flex-1 flex flex-col items-center justify-center gap-1 p-3 rounded-lg border-2 transition-all ${
+                            timeFormat === '24h' 
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' 
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span className="font-medium">24 ساعة</span>
+                          <span className="text-sm opacity-70">14:30</span>
+                        </button>
+                        <button
+                          onClick={async () => {
+                            setTimeFormat('12h');
+                            try {
+                              await systemSettingsApi.update('timeFormat', '12h', 'string');
+                              notify('تم تعيين تنسيق الوقت ✓', 'success');
+                            } catch (err) {
+                              notify('فشل حفظ الإعداد!', 'error');
+                            }
+                          }}
+                          className={`flex-1 flex flex-col items-center justify-center gap-1 p-3 rounded-lg border-2 transition-all ${
+                            timeFormat === '12h' 
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' 
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span className="font-medium">12 ساعة</span>
+                          <span className="text-sm opacity-70">2:30 م</span>
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 text-center">
+                        ص = صباحاً | م = مساءً
+                      </p>
+                    </div>
+
+                    {/* Date Display Style Settings */}
+                    <div className="p-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
+                        <Calendar size={16} className="inline ml-1" />
+                        نمط عرض التاريخ
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            setDateDisplayStyle('numeric');
+                            try {
+                              await systemSettingsApi.update('dateDisplayStyle', 'numeric', 'string');
+                              notify('تم تعيين نمط عرض التاريخ ✓', 'success');
+                            } catch (err) {
+                              notify('فشل حفظ الإعداد!', 'error');
+                            }
+                          }}
+                          className={`flex-1 flex flex-col items-center justify-center gap-1 p-3 rounded-lg border-2 transition-all ${
+                            dateDisplayStyle === 'numeric' 
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' 
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span className="font-medium">رقمي</span>
+                          <span className="text-sm opacity-70">27-01-2026</span>
+                        </button>
+                        <button
+                          onClick={async () => {
+                            setDateDisplayStyle('arabic');
+                            try {
+                              await systemSettingsApi.update('dateDisplayStyle', 'arabic', 'string');
+                              notify('تم تعيين نمط عرض التاريخ ✓', 'success');
+                            } catch (err) {
+                              notify('فشل حفظ الإعداد!', 'error');
+                            }
+                          }}
+                          className={`flex-1 flex flex-col items-center justify-center gap-1 p-3 rounded-lg border-2 transition-all ${
+                            dateDisplayStyle === 'arabic' 
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' 
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span className="font-medium">عربي نصي</span>
+                          <span className="text-sm opacity-70">٢٧ يناير ٢٠٢٦</span>
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 text-center">
+                        يؤثر على طريقة عرض التاريخ في جميع أنحاء التطبيق
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4426,10 +4595,20 @@ const Settings: React.FC = () => {
                     className="p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
                   >
                     <option value="">الكل</option>
-                    <option value="Login">تسجيل دخول</option>
-                    <option value="Create">إنشاء</option>
-                    <option value="Update">تحديث</option>
-                    <option value="Delete">حذف</option>
+                    <option value="تسجيل دخول">تسجيل دخول</option>
+                    <option value="إنشاء">إنشاء (عام)</option>
+                    <option value="إنشاء منتج">إنشاء منتج</option>
+                    <option value="إنشاء عميل">إنشاء عميل</option>
+                    <option value="إنشاء فاتورة">إنشاء فاتورة</option>
+                    <option value="إنشاء مصروف">إنشاء مصروف</option>
+                    <option value="إنشاء وحدة">إنشاء وحدة</option>
+                    <option value="تعديل">تعديل (عام)</option>
+                    <option value="تعديل منتج">تعديل منتج</option>
+                    <option value="تعديل عميل">تعديل عميل</option>
+                    <option value="تعديل فاتورة">تعديل فاتورة</option>
+                    <option value="حذف">حذف (عام)</option>
+                    <option value="حذف منتج">حذف منتج</option>
+                    <option value="حذف عميل">حذف عميل</option>
                   </select>
                 </div>
                 {logsPeriod === 'custom' && (

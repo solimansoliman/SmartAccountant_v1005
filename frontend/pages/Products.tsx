@@ -287,121 +287,149 @@ const Products: React.FC = () => {
       
       {/* --- Unit Management Modals --- */}
       
-      {/* 1. Main Unit Modal */}
+      {/* 1. Main Unit Modal - Enhanced Design */}
       {showUnitModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110] p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
-             <div className="bg-slate-800 dark:bg-slate-700 text-white p-4 flex justify-between items-center shrink-0">
-                <h3 className="font-bold flex items-center gap-2">
-                   <Settings size={18} /> إدارة الوحدات
-                </h3>
-                <button onClick={() => setShowUnitModal(false)} className="hover:text-rose-300"><X size={20}/></button>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110] p-4 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800/95 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-700">
+             {/* Header */}
+             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-blue-100 dark:bg-blue-900/30">
+                      <Scale size={22} className="text-blue-600 dark:text-blue-400"/>
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-lg text-blue-600 dark:text-blue-400">إدارة الوحدات</h3>
+                      <p className="text-slate-500 dark:text-slate-400 text-sm">إضافة وتعديل وحدات القياس</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowUnitModal(false)} 
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-slate-500 hover:text-slate-700 transition-all"
+                  >
+                    <X size={22}/>
+                  </button>
+                </div>
              </div>
              
-             {/* Add New Unit - Three Fields */}
-             <div className="p-4 bg-slate-50 dark:bg-slate-900 border-b dark:border-slate-700 shrink-0 space-y-3">
-                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">إضافة وحدة جديدة:</p>
-                 <div className="grid grid-cols-3 gap-2">
-                     <input 
-                       type="text" 
-                       placeholder="الاسم العربي *" 
-                       className="border border-slate-300 dark:border-slate-600 p-2 rounded-lg text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary text-slate-900 dark:text-white bg-white dark:bg-slate-700 placeholder:text-slate-400 font-medium"
-                       value={newUnitName}
-                       onChange={e => setNewUnitName(e.target.value)}
-                     />
-                     <input 
-                       type="text" 
-                       placeholder="الاسم الإنجليزي" 
-                       className="border border-slate-300 dark:border-slate-600 p-2 rounded-lg text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary text-slate-900 dark:text-white bg-white dark:bg-slate-700 placeholder:text-slate-400"
-                       value={newUnitNameEn}
-                       onChange={e => setNewUnitNameEn(e.target.value)}
-                     />
-                     <input 
-                       type="text" 
-                       placeholder="الرمز" 
-                       className="border border-slate-300 dark:border-slate-600 p-2 rounded-lg text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary text-slate-900 dark:text-white bg-white dark:bg-slate-700 placeholder:text-slate-400"
-                       value={newUnitSymbol}
-                       onChange={e => setNewUnitSymbol(e.target.value)}
-                     />
+             {/* Add New Unit Section */}
+             <div className="p-5 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 shrink-0 space-y-4">
+                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
+                   <Plus size={16} className="text-emerald-500" />
+                   إضافة وحدة جديدة
+                 </div>
+                 <div className="grid grid-cols-3 gap-3">
+                     <div>
+                       <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">الاسم العربي *</label>
+                       <input 
+                         type="text" 
+                         placeholder="مثال: كيلو" 
+                         className="w-full border-2 border-slate-200 dark:border-slate-600 p-2.5 rounded-xl text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 dark:text-white bg-white dark:bg-slate-700 placeholder:text-slate-400 font-medium transition-all"
+                         value={newUnitName}
+                         onChange={e => setNewUnitName(e.target.value)}
+                       />
+                     </div>
+                     <div>
+                       <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">الاسم الإنجليزي</label>
+                       <input 
+                         type="text" 
+                         placeholder="Kilogram" 
+                         className="w-full border-2 border-slate-200 dark:border-slate-600 p-2.5 rounded-xl text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-slate-900 dark:text-white bg-white dark:bg-slate-700 placeholder:text-slate-400 transition-all"
+                         value={newUnitNameEn}
+                         onChange={e => setNewUnitNameEn(e.target.value)}
+                       />
+                     </div>
+                     <div>
+                       <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">الرمز</label>
+                       <input 
+                         type="text" 
+                         placeholder="kg" 
+                         className="w-full border-2 border-slate-200 dark:border-slate-600 p-2.5 rounded-xl text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 text-slate-900 dark:text-white bg-white dark:bg-slate-700 placeholder:text-slate-400 font-mono transition-all"
+                         value={newUnitSymbol}
+                         onChange={e => setNewUnitSymbol(e.target.value)}
+                       />
+                     </div>
                  </div>
                  <button 
                    onClick={handleAddUnit}
-                   className="w-full bg-emerald-600 text-white p-2 rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center justify-center gap-2"
+                   className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-3 rounded-xl hover:from-emerald-700 hover:to-teal-700 transition-all shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 font-bold transform hover:-translate-y-0.5 active:translate-y-0"
                  >
                    <Plus size={18} />
                    <span>إضافة الوحدة</span>
                  </button>
+             </div>
                  
-                 {/* Filter Units */}
+             {/* Search Units */}
+             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 shrink-0">
                  <div className="relative">
-                     <Search size={16} className="absolute right-3 top-2.5 text-slate-400" />
+                     <Search size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
                      <input 
                         type="text" 
                         placeholder="بحث عن وحدة..." 
-                        className="w-full pr-9 pl-3 py-2 border border-slate-200 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700 dark:text-white focus:border-blue-400 outline-none"
+                        className="w-full pr-10 pl-4 py-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-xl text-sm bg-white dark:bg-slate-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
                         value={unitSearch}
                         onChange={e => setUnitSearch(e.target.value)}
                      />
                  </div>
              </div>
 
-             {/* Units List - Table Style */}
+             {/* Units List */}
              <div className="overflow-y-auto flex-1 dark:bg-slate-800">
-                 {/* Header */}
-                 <div className="grid grid-cols-4 gap-2 p-3 bg-slate-100 dark:bg-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 sticky top-0">
-                    <span>الاسم العربي</span>
+                 {/* Table Header */}
+                 <div className="grid grid-cols-4 gap-2 px-5 py-3 bg-slate-100 dark:bg-slate-700/50 text-xs font-bold text-slate-600 dark:text-slate-300 sticky top-0 border-b border-slate-200 dark:border-slate-600">
+                    <span className="flex items-center gap-1.5"><Scale size={12} /> الاسم العربي</span>
                     <span>الاسم الإنجليزي</span>
                     <span>الرمز</span>
                     <span className="text-center">إجراءات</span>
                  </div>
                  
                  {filteredUnits.map((unit) => (
-                     <div key={unit.id} className="grid grid-cols-4 gap-2 p-3 hover:bg-slate-50 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 last:border-0 items-center text-sm">
+                     <div key={unit.id} className="grid grid-cols-4 gap-2 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-b border-slate-100 dark:border-slate-700 last:border-0 items-center text-sm transition-colors">
                          {editingUnit?.id === unit.id ? (
                              <>
                                  <input 
                                     type="text" 
-                                    className="border-2 border-primary p-1.5 rounded text-sm text-slate-900 dark:text-white bg-white dark:bg-slate-600 outline-none font-bold"
+                                    className="border-2 border-emerald-500 p-2 rounded-lg text-sm text-slate-900 dark:text-white bg-white dark:bg-slate-600 outline-none font-bold"
                                     value={editingUnit.name}
                                     onChange={e => setEditingUnit({...editingUnit, name: e.target.value})}
                                     autoFocus
                                  />
                                  <input 
                                     type="text" 
-                                    className="border-2 border-blue-300 p-1.5 rounded text-sm text-slate-900 dark:text-white bg-white dark:bg-slate-600 outline-none"
+                                    className="border-2 border-blue-400 p-2 rounded-lg text-sm text-slate-900 dark:text-white bg-white dark:bg-slate-600 outline-none"
                                     value={editingUnit.nameEn}
                                     onChange={e => setEditingUnit({...editingUnit, nameEn: e.target.value})}
                                  />
                                  <input 
                                     type="text" 
-                                    className="border-2 border-blue-300 p-1.5 rounded text-sm text-slate-900 dark:text-white bg-white dark:bg-slate-600 outline-none"
+                                    className="border-2 border-purple-400 p-2 rounded-lg text-sm text-slate-900 dark:text-white bg-white dark:bg-slate-600 outline-none font-mono"
                                     value={editingUnit.symbol}
                                     onChange={e => setEditingUnit({...editingUnit, symbol: e.target.value})}
                                  />
-                                 <div className="flex gap-1 justify-center">
-                                     <button onClick={requestSaveEditUnit} className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 p-1.5 rounded"><Check size={14}/></button>
-                                     <button onClick={() => setEditingUnit(null)} className="bg-rose-100 text-rose-700 hover:bg-rose-200 p-1.5 rounded"><XCircle size={14}/></button>
+                                 <div className="flex gap-1.5 justify-center">
+                                     <button onClick={requestSaveEditUnit} className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 p-2 rounded-lg transition-colors"><Check size={16}/></button>
+                                     <button onClick={() => setEditingUnit(null)} className="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-900/50 p-2 rounded-lg transition-colors"><XCircle size={16}/></button>
                                  </div>
                              </>
                          ) : (
                              <>
-                                <span className="font-medium text-slate-700 dark:text-slate-200">{unit.name}</span>
+                                <span className="font-semibold text-slate-700 dark:text-slate-200">{unit.name}</span>
                                 <span className="text-slate-500 dark:text-slate-400">{unit.nameEn || '-'}</span>
-                                <span className="text-slate-500 dark:text-slate-400 font-mono">{unit.symbol}</span>
-                                <div className="flex gap-1 justify-center">
+                                <span className="text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-xs">{unit.symbol}</span>
+                                <div className="flex gap-1.5 justify-center">
                                     <button 
                                       onClick={() => startEditUnit(unit)}
-                                      className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-600 rounded transition-colors"
+                                      className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
                                       title="تعديل"
                                     >
-                                        <Edit2 size={14} />
+                                        <Edit2 size={16} />
                                     </button>
                                     <button 
                                       onClick={() => requestDeleteUnit({id: unit.id!, name: unit.name})}
-                                      className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-slate-600 rounded transition-colors"
+                                      className="p-2 text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
                                       title="حذف"
                                     >
-                                        <Trash2 size={14} />
+                                        <Trash2 size={16} />
                                     </button>
                                 </div>
                              </>
@@ -409,8 +437,10 @@ const Products: React.FC = () => {
                      </div>
                  ))}
                  {filteredUnits.length === 0 && (
-                     <div className="text-center text-slate-400 p-8 text-sm flex flex-col items-center gap-2">
-                         <Filter size={24} className="opacity-20"/>
+                     <div className="text-center text-slate-400 p-10 text-sm flex flex-col items-center gap-3">
+                         <div className="p-4 bg-slate-100 dark:bg-slate-700 rounded-full">
+                           <Scale size={32} className="opacity-30"/>
+                         </div>
                          <p>لا توجد وحدات مطابقة</p>
                      </div>
                  )}
@@ -735,103 +765,206 @@ const Products: React.FC = () => {
         </div>
 
       ) : (
-        /* Create/Edit Product View */
-        <div className="max-w-xl mx-auto animate-in slide-in-from-left-4 duration-300">
-          <div className="bg-white dark:bg-slate-800/90 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                  {isEditing ? <Edit2 size={20} className="text-blue-600"/> : <Package size={20} className="text-emerald-600"/>}
-                  {isEditing ? 'تعديل المنتج' : 'إضافة منتج جديد'}
-              </h3>
-              <button onClick={cancelEdit} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-500">
-                <X size={20} />
-              </button>
+        /* Create/Edit Product View - Enhanced Design */
+        <div className="max-w-2xl mx-auto animate-in slide-in-from-left-4 duration-300">
+          <div className="bg-white dark:bg-slate-800/95 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl ${isEditing 
+                    ? 'bg-blue-100 dark:bg-blue-900/30' 
+                    : 'bg-emerald-100 dark:bg-emerald-900/30'}`}>
+                    {isEditing 
+                      ? <Edit2 size={24} className="text-blue-600 dark:text-blue-400"/> 
+                      : <Package size={24} className="text-emerald-600 dark:text-emerald-400"/>}
+                  </div>
+                  <div>
+                    <h3 className={`font-bold text-xl ${isEditing 
+                      ? 'text-blue-600 dark:text-blue-400' 
+                      : 'text-emerald-600 dark:text-emerald-400'}`}>
+                      {isEditing ? 'تعديل المنتج' : 'إضافة منتج جديد'}
+                    </h3>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
+                      {isEditing ? 'قم بتحديث بيانات المنتج' : 'أضف منتجاً جديداً إلى مخزونك'}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={cancelEdit} 
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-all"
+                >
+                  <X size={22} />
+                </button>
+              </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">اسم المنتج *</label>
-                <input 
-                  type="text" 
-                  className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-primary outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400"
-                  value={formName}
-                  onChange={e => setFormName(e.target.value)}
-                  placeholder="اسم الصنف..."
-                />
+            {/* Form Content */}
+            <form onSubmit={handleSubmit} className="p-6 space-y-5">
+              {/* Product Name */}
+              <div className="group">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  <Package size={16} className="text-emerald-500" />
+                  اسم المنتج
+                  <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 pr-11 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white placeholder:text-slate-400 transition-all"
+                    value={formName}
+                    onChange={e => setFormName(e.target.value)}
+                    placeholder="مثال: قهوة عربية..."
+                  />
+                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Package size={18} />
+                  </div>
+                </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">سعر البيع *</label>
-                  <input 
-                    type="number" 
-                    className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-primary outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400"
-                    value={formPrice}
-                    onChange={e => setFormPrice(e.target.value)}
-                    placeholder="0.00"
-                    step="0.01"
-                  />
+              {/* Price and Unit Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Price */}
+                <div className="group">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                    <DollarSign size={16} className="text-amber-500" />
+                    سعر البيع
+                    <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input 
+                      type="number" 
+                      className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 pr-11 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 dark:focus:border-amber-400 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white placeholder:text-slate-400 transition-all"
+                      value={formPrice}
+                      onChange={e => setFormPrice(e.target.value)}
+                      placeholder="0.00"
+                      step="0.01"
+                    />
+                    <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                      <DollarSign size={18} />
+                    </div>
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-200 dark:bg-slate-600 px-2 py-1 rounded-md">
+                      {currency}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 flex justify-between">
-                    الوحدة
+
+                {/* Unit */}
+                <div className="group">
+                  <label className="flex items-center justify-between text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                    <span className="flex items-center gap-2">
+                      <Scale size={16} className="text-blue-500" />
+                      الوحدة
+                    </span>
                     <button 
                       type="button" 
                       onClick={() => setShowUnitModal(true)} 
-                      className="text-blue-600 dark:text-blue-400 hover:text-blue-800 text-[10px] flex items-center gap-1 bg-blue-50 dark:bg-blue-900/30 px-1.5 rounded"
+                      className="text-blue-600 dark:text-blue-400 hover:text-blue-700 text-xs flex items-center gap-1 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-all"
                     >
-                      <Settings size={10} /> إدارة
+                      <Settings size={12} /> إدارة الوحدات
                     </button>
                   </label>
-                  <select 
-                    className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-primary outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
-                    value={formUnit}
-                    onChange={e => setFormUnit(e.target.value)}
-                  >
-                    {availableUnits.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select 
+                      className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 pr-11 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 dark:focus:border-blue-400 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white transition-all appearance-none cursor-pointer"
+                      value={formUnit}
+                      onChange={e => setFormUnit(e.target.value)}
+                    >
+                      {availableUnits.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                    <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                      <Scale size={18} />
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">الكمية الافتتاحية (اختياري)</label>
-                <input 
-                  type="number" 
-                  className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-primary outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400"
-                  value={formStock}
-                  onChange={e => setFormStock(e.target.value)}
-                  placeholder="الرصيد في المخزن"
-                />
+              {/* Opening Stock */}
+              <div className="group">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  <Archive size={16} className="text-purple-500" />
+                  الكمية الافتتاحية
+                  <span className="text-slate-400 text-xs font-normal">(اختياري)</span>
+                </label>
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 pr-11 focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 dark:focus:border-purple-400 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white placeholder:text-slate-400 transition-all"
+                    value={formStock}
+                    onChange={e => setFormStock(e.target.value)}
+                    placeholder="0"
+                  />
+                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Archive size={18} />
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">ملاحظات (اختياري)</label>
+              {/* Notes */}
+              <div className="group">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  <Edit2 size={16} className="text-slate-500" />
+                  ملاحظات
+                  <span className="text-slate-400 text-xs font-normal">(اختياري)</span>
+                </label>
                 <textarea 
-                  className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-primary outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 resize-none h-24"
+                  className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-slate-500/20 focus:border-slate-400 dark:focus:border-slate-500 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white placeholder:text-slate-400 resize-none h-28 transition-all"
                   value={formNotes}
                   onChange={e => setFormNotes(e.target.value)}
-                  placeholder="وصف إضافي للمنتج..."
+                  placeholder="أضف وصفاً أو ملاحظات إضافية للمنتج..."
                 />
               </div>
               
-              <div className="flex gap-3 pt-4">
-                  <button 
-                      type="submit" 
-                      disabled={formLoading}
-                      className={`flex-1 text-white py-3 rounded-lg transition-colors font-bold flex items-center justify-center gap-2 ${isEditing ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
-                  >
-                      {formLoading ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                      {formLoading ? 'جاري الحفظ...' : isEditing ? 'حفظ التعديلات' : 'حفظ المنتج'}
-                  </button>
-                  <button 
-                      type="button" 
-                      onClick={cancelEdit}
-                      className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 px-6 py-3 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600"
-                  >
-                      إلغاء
-                  </button>
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                <button 
+                  type="submit" 
+                  disabled={formLoading}
+                  className={`flex-1 text-white py-3.5 rounded-xl transition-all font-bold flex items-center justify-center gap-2.5 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-70 disabled:cursor-not-allowed ${
+                    isEditing 
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-blue-500/25' 
+                      : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-emerald-500/25'
+                  }`}
+                >
+                  {formLoading ? (
+                    <>
+                      <Loader2 size={20} className="animate-spin" />
+                      جاري الحفظ...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={20} />
+                      {isEditing ? 'حفظ التعديلات' : 'حفظ المنتج'}
+                    </>
+                  )}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={cancelEdit}
+                  className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 px-6 py-3.5 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 font-semibold flex items-center gap-2 transition-all"
+                >
+                  <XCircle size={18} />
+                  إلغاء
+                </button>
               </div>
             </form>
+          </div>
+
+          {/* Tips Card */}
+          <div className="mt-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-xl">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-amber-100 dark:bg-amber-800/30 rounded-lg">
+                <AlertCircle size={18} className="text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <h4 className="font-semibold text-amber-800 dark:text-amber-300 text-sm">نصائح سريعة</h4>
+                <ul className="mt-1.5 text-xs text-amber-700 dark:text-amber-400/80 space-y-1">
+                  <li>• تأكد من إدخال اسم واضح للمنتج لسهولة البحث</li>
+                  <li>• يمكنك تعديل سعر البيع لاحقاً من قائمة المنتجات</li>
+                  <li>• الكمية الافتتاحية تساعد في تتبع المخزون</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
       )}

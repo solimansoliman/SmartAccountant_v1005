@@ -457,67 +457,67 @@ const Customers: React.FC = () => {
           </div>
           
           {/* فلاتر الفترة الزمنية */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 print:hidden">
-            <div className="flex flex-wrap items-center gap-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-2 sm:p-4 print:hidden">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-4">
               {/* أزرار الفترة السريعة */}
-              <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-lg">
+              <div className="flex bg-slate-100 dark:bg-slate-700 p-0.5 sm:p-1 rounded-lg overflow-x-auto">
                 <button 
                   onClick={() => setDateRange('all')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'all' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  className={`flex-1 sm:flex-none px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-bold rounded-md transition-all whitespace-nowrap ${filterPeriod === 'all' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
                   الكل
                 </button>
                 <button 
                   onClick={() => setDateRange('week')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'week' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  className={`flex-1 sm:flex-none px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-bold rounded-md transition-all whitespace-nowrap ${filterPeriod === 'week' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
                   الأسبوع
                 </button>
                 <button 
                   onClick={() => setDateRange('month')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'month' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  className={`flex-1 sm:flex-none px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-bold rounded-md transition-all whitespace-nowrap ${filterPeriod === 'month' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
                   الشهر
                 </button>
                 <button 
                   onClick={() => setDateRange('year')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'year' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  className={`flex-1 sm:flex-none px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-bold rounded-md transition-all whitespace-nowrap ${filterPeriod === 'year' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
                   السنة
                 </button>
                 <button 
                   onClick={() => setFilterPeriod('custom')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'custom' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  className={`flex-1 sm:flex-none px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-bold rounded-md transition-all whitespace-nowrap ${filterPeriod === 'custom' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
-                  تاريخ مخصص
+                  مخصص
                 </button>
               </div>
               
               {/* حقول التاريخ المخصص - تظهر فقط عند اختيار "تاريخ مخصص" */}
               {filterPeriod === 'custom' && (
-                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
-                  <Calendar size={16} className="text-primary" />
-                  <span className="text-xs text-slate-500">من:</span>
+                <div className="flex flex-wrap items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
+                  <Calendar size={14} className="text-primary hidden sm:block" />
+                  <span className="text-[10px] sm:text-xs text-slate-500">من:</span>
                   <DateInput
                     value={filterDateFrom}
                     onChange={setFilterDateFrom}
-                    className="px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:border-primary w-32"
+                    className="px-2 py-1 sm:py-1.5 text-[10px] sm:text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:border-primary w-24 sm:w-32"
                     placeholder="يوم-شهر-سنة"
                   />
-                  <span className="text-xs text-slate-500">إلى:</span>
+                  <span className="text-[10px] sm:text-xs text-slate-500">إلى:</span>
                   <DateInput
                     value={filterDateTo}
                     onChange={setFilterDateTo}
-                    className="px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:border-primary w-32"
+                    className="px-2 py-1 sm:py-1.5 text-[10px] sm:text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:border-primary w-24 sm:w-32"
                     placeholder="يوم-شهر-سنة"
                   />
                 </div>
               )}
               
               {/* عداد النتائج */}
-              <div className="text-xs text-slate-500 mr-auto">
+              <div className="text-[10px] sm:text-xs text-slate-500 sm:mr-auto w-full sm:w-auto text-center sm:text-right pt-1 sm:pt-0 border-t sm:border-0 border-slate-100 dark:border-slate-700">
                 عدد العملاء: <span className="font-bold text-primary">{filteredCustomers.length}</span>
-                {filterPeriod !== 'all' && <span className="text-slate-400 mr-2">(عملاء لديهم فواتير في الفترة المحددة)</span>}
+                {filterPeriod !== 'all' && <span className="text-slate-400 mr-1 sm:mr-2 hidden sm:inline">(عملاء لديهم فواتير في الفترة المحددة)</span>}
               </div>
             </div>
           </div>
@@ -676,66 +676,131 @@ const Customers: React.FC = () => {
         </div>
 
       ) : view === 'create' ? (
-        /* Create/Edit Customer View */
-        <div className="max-w-xl mx-auto animate-in slide-in-from-left-4 duration-300">
-          <div className="bg-white dark:bg-slate-800/90 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                  {editingCustomerId ? <Edit2 size={20} className="text-blue-600"/> : <UserPlus size={20} className="text-emerald-600"/>}
-                  {editingCustomerId ? 'تعديل بيانات العميل' : 'إضافة عميل جديد'}
-              </h3>
-              <button onClick={cancelEdit} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-500">
-                <X size={20} />
-              </button>
+        /* Create/Edit Customer View - Enhanced Design */
+        <div className="max-w-2xl mx-auto animate-in slide-in-from-left-4 duration-300">
+          <div className="bg-white dark:bg-slate-800/95 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl ${editingCustomerId 
+                    ? 'bg-blue-100 dark:bg-blue-900/30' 
+                    : 'bg-emerald-100 dark:bg-emerald-900/30'}`}>
+                    {editingCustomerId 
+                      ? <Edit2 size={24} className="text-blue-600 dark:text-blue-400"/> 
+                      : <UserPlus size={24} className="text-emerald-600 dark:text-emerald-400"/>}
+                  </div>
+                  <div>
+                    <h3 className={`font-bold text-xl ${editingCustomerId 
+                      ? 'text-blue-600 dark:text-blue-400' 
+                      : 'text-emerald-600 dark:text-emerald-400'}`}>
+                      {editingCustomerId ? 'تعديل بيانات العميل' : 'إضافة عميل جديد'}
+                    </h3>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
+                      {editingCustomerId ? 'قم بتحديث بيانات العميل' : 'أضف عميلاً جديداً إلى قائمتك'}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={cancelEdit} 
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-all"
+                >
+                  <X size={22} />
+                </button>
+              </div>
             </div>
 
-            <form onSubmit={handleSubmitForm} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">اسم العميل *</label>
-                <input 
-                  type="text" 
-                  className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-primary outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400"
-                  value={formCustName}
-                  onChange={e => setFormCustName(e.target.value)}
-                  placeholder="الاسم الثلاثي"
-                />
+            {/* Form Content */}
+            <form onSubmit={handleSubmitForm} className="p-6 space-y-5">
+              {/* Customer Name */}
+              <div className="group">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  <User size={16} className="text-emerald-500" />
+                  اسم العميل
+                  <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 pr-11 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white placeholder:text-slate-400 transition-all"
+                    value={formCustName}
+                    onChange={e => setFormCustName(e.target.value)}
+                    placeholder="مثال: محمد أحمد علي..."
+                  />
+                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                    <User size={18} />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">رقم الهاتف</label>
-                <input 
-                  type="text" 
-                  className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-primary outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400"
-                  value={formCustPhone}
-                  onChange={e => setFormCustPhone(e.target.value)}
-                  placeholder="05xxxxxxxx"
-                />
+
+              {/* Phone Number */}
+              <div className="group">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  <Phone size={16} className="text-blue-500" />
+                  رقم الهاتف
+                  <span className="text-slate-400 text-xs font-normal">(اختياري)</span>
+                </label>
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 pr-11 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 dark:focus:border-blue-400 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white placeholder:text-slate-400 transition-all"
+                    value={formCustPhone}
+                    onChange={e => setFormCustPhone(e.target.value)}
+                    placeholder="05xxxxxxxx"
+                    dir="ltr"
+                  />
+                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Phone size={18} />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">ملاحظات (اختياري)</label>
+
+              {/* Notes */}
+              <div className="group">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  <StickyNote size={16} className="text-amber-500" />
+                  ملاحظات
+                  <span className="text-slate-400 text-xs font-normal">(اختياري)</span>
+                </label>
                 <textarea 
-                  className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-primary outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 resize-none h-24"
+                  className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 dark:focus:border-amber-400 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white placeholder:text-slate-400 resize-none h-28 transition-all"
                   value={formCustNotes}
                   onChange={e => setFormCustNotes(e.target.value)}
-                  placeholder="عنوان، تفاصيل إضافية..."
+                  placeholder="عنوان، تفاصيل إضافية، ملاحظات خاصة..."
                 />
               </div>
               
-              <div className="flex gap-3 pt-4">
-                  <button 
-                      type="submit" 
-                      disabled={formLoading}
-                      className={`flex-1 text-white py-3 rounded-lg transition-colors font-bold flex items-center justify-center gap-2 ${editingCustomerId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
-                  >
-                      {formLoading ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                      {formLoading ? 'جاري الحفظ...' : editingCustomerId ? 'حفظ التعديلات' : 'حفظ العميل'}
-                  </button>
-                  <button 
-                      type="button" 
-                      onClick={cancelEdit}
-                      className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 px-6 py-3 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600"
-                  >
-                      إلغاء
-                  </button>
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                <button 
+                  type="submit" 
+                  disabled={formLoading}
+                  className={`flex-1 text-white py-3.5 rounded-xl transition-all font-bold flex items-center justify-center gap-2.5 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-70 disabled:cursor-not-allowed ${
+                    editingCustomerId 
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-blue-500/25' 
+                      : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-emerald-500/25'
+                  }`}
+                >
+                  {formLoading ? (
+                    <>
+                      <Loader2 size={20} className="animate-spin" />
+                      جاري الحفظ...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={20} />
+                      {editingCustomerId ? 'حفظ التعديلات' : 'حفظ العميل'}
+                    </>
+                  )}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={cancelEdit}
+                  className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 px-6 py-3.5 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 font-semibold flex items-center gap-2 transition-all"
+                >
+                  <XCircle size={18} />
+                  إلغاء
+                </button>
               </div>
             </form>
           </div>

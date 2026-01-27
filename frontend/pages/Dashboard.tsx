@@ -1,42 +1,41 @@
 import React, { useMemo, useEffect, useState } from 'react';
-import { ArrowUpRight, ArrowDownRight, DollarSign, ShoppingBag, CreditCard, TrendingUp, Package, PieChart, Users, FileText, Banknote, Clock, Wallet, RefreshCw, Loader2, ShoppingCart, Receipt, Target, Award, AlertTriangle, CheckCircle, Activity, Crown, Zap, Settings2, Eye, EyeOff, LayoutGrid } from 'lucide-react';
+import { ArrowDownRight, TrendingUp, Package, PieChart, Users, FileText, Banknote, Clock, Wallet, RefreshCw, Loader2, ShoppingCart, Receipt, Target, Award, AlertTriangle, CheckCircle, Activity, Settings2, CreditCard } from 'lucide-react';
 import { useCustomers, useProducts, useInvoices, useExpenses, useRevenues } from '../services/dataHooks';
-import { PaymentType } from '../types';
 import { useSettings } from '../context/SettingsContext';
-import { formatDateArabic } from '../services/dateService';
+import { formatDateArabic, formatDate } from '../services/dateService';
 import { usePagePermission } from '../services/permissionsHooks';
 import AccessDenied from '../components/AccessDenied';
 import { useAuth } from '../context/AuthContext';
 import { accountApi, AccountUsageDto } from '../services/adminApi';
-import { Link } from 'react-router-dom';
 import WidgetSettingsPanel from '../components/WidgetSettingsPanel';
 import { useDashboardWidgets } from '../services/useDashboardWidgets';
 
 const Dashboard: React.FC = () => {
-  const { currency } = useSettings();
+  const { currency, autoRefreshEnabled, autoRefreshInterval } = useSettings();
   const { user } = useAuth();
   
   // Account Usage State
   const [accountUsage, setAccountUsage] = useState<AccountUsageDto | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
   
+  // Auto Refresh Countdown (local to Dashboard)
+  const [refreshCountdown, setRefreshCountdown] = useState(autoRefreshInterval || 30);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
   // Widget Customization
   const { 
-    widgets, 
-    visibleWidgets, 
-    editMode, 
-    toggleEditMode, 
+    widgets,
     handleToggleVisibility, 
     handleReset 
   } = useDashboardWidgets();
   const [showWidgetSettings, setShowWidgetSettings] = useState(false);
   
   // API Hooks
-  const { customers, loading: customersLoading } = useCustomers();
-  const { products, loading: productsLoading } = useProducts();
-  const { invoices, loading: invoicesLoading } = useInvoices();
-  const { expenses, loading: expensesLoading } = useExpenses();
-  const { revenues, loading: revenuesLoading } = useRevenues();
+  const { customers, loading: customersLoading, refresh: refreshCustomers } = useCustomers();
+  const { products, loading: productsLoading, refresh: refreshProducts } = useProducts();
+  const { invoices, loading: invoicesLoading, refresh: refreshInvoices } = useInvoices();
+  const { expenses, loading: expensesLoading, refresh: refreshExpenses } = useExpenses();
+  const { revenues, loading: revenuesLoading, refresh: refreshRevenues } = useRevenues();
   
   // ==================== صلاحيات الصفحة ====================
   const pagePerms = usePagePermission('dashboard');
@@ -67,6 +66,46 @@ const Dashboard: React.FC = () => {
     loadAccountUsage();
   }, [user?.accountId]);
 
+  // Auto Refresh Timer for Dashboard
+  useEffect(() => {
+    if (!autoRefreshEnabled || autoRefreshInterval <= 0) {
+      setRefreshCountdown(autoRefreshInterval > 0 ? autoRefreshInterval : 30);
+      return;
+    }
+    
+    const interval = setInterval(() => {
+      setRefreshCountdown(prev => {
+        if (prev <= 1) {
+          // تحديث البيانات
+          handleRefresh();
+          return autoRefreshInterval;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [autoRefreshEnabled, autoRefreshInterval]);
+
+  // Handle manual/auto refresh
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        refreshCustomers?.(),
+        refreshProducts?.(),
+        refreshInvoices?.(),
+        refreshExpenses?.(),
+        refreshRevenues?.()
+      ]);
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setIsRefreshing(false);
+      setRefreshCountdown(autoRefreshInterval || 30);
+    }
+  };
+
   // إذا لم يكن لديه صلاحية عرض الصفحة
   if (pagePerms.checked && !pagePerms.canView) {
     return <AccessDenied />;
@@ -75,17 +114,19 @@ const Dashboard: React.FC = () => {
   // Calculate stats from API data
   const stats = useMemo(() => {
     const totalRevenue = invoices.reduce((sum, inv) => sum + (inv.paidAmount || 0), 0);
-    // المصروفات = كل شيء ليس مشتريات
+    // المصروفات = كل شيء ليس مشتريات ولا إيرادات أخرى
     const totalExpenses = expenses
-      .filter(exp => !exp.transactionTypeCode?.includes('PURCHASE'))
+      .filter(exp => !exp.transactionTypeCode?.includes('PURCHASE') && exp.transactionTypeCode !== 'OTHER_REV')
       .reduce((sum, exp) => sum + (exp.totalAmount || 0), 0);
     // المشتريات = كل ما يحتوي على PURCHASE
     const totalPurchases = expenses
       .filter(exp => exp.transactionTypeCode?.includes('PURCHASE'))
       .reduce((sum, exp) => sum + (exp.totalAmount || 0), 0);
     const outstandingDebts = invoices.reduce((sum, inv) => sum + (inv.remainingAmount || 0), 0);
-    // الإيرادات الأخرى من جدول Revenues
-    const totalOtherIncome = revenues.reduce((sum, rev) => sum + (rev.totalAmount || 0), 0);
+    // الإيرادات الأخرى من جدول Expenses (متوافق مع صفحة المصروفات)
+    const totalOtherIncome = expenses
+      .filter(exp => exp.transactionTypeCode === 'OTHER_REV')
+      .reduce((sum, exp) => sum + (exp.totalAmount || 0), 0);
     const netProfit = totalRevenue + totalOtherIncome - totalExpenses - totalPurchases;
     
     return {
@@ -96,23 +137,31 @@ const Dashboard: React.FC = () => {
       outstandingDebts,
       totalOtherIncome
     };
-  }, [invoices, expenses, revenues]);
+  }, [invoices, expenses]);
 
   // Revenue Breakdown
   const revenueBreakdown = useMemo(() => {
-    const cashInvoices = invoices.filter(i => i.type === PaymentType.CASH);
-    const creditInvoices = invoices.filter(i => i.type === PaymentType.CREDIT);
+    // تحديد نوع الفاتورة بناءً على المبلغ المتبقي (لأن type قد يكون فارغ)
+    // فاتورة آجلة = لها مبلغ متبقي أكبر من 0
+    // فاتورة نقدية = المبلغ المتبقي = 0 (مدفوعة بالكامل)
+    const cashInvoices = invoices.filter(i => (i.remainingAmount || 0) <= 0);
+    const creditInvoices = invoices.filter(i => (i.remainingAmount || 0) > 0);
     
+    // مبيعات فورية = المدفوع من الفواتير النقدية
     const directSales = cashInvoices.reduce((sum, inv) => sum + (inv.paidAmount || 0), 0);
+    // تحصيل آجل = المدفوع من الفواتير الآجلة (التي لا زال عليها متبقي)
     const collections = creditInvoices.reduce((sum, inv) => sum + (inv.paidAmount || 0), 0);
-    const otherIncome = revenues.reduce((sum, rev) => sum + (rev.totalAmount || 0), 0);
+    // الإيرادات الأخرى من Expenses (متوافق مع صفحة المصروفات)
+    const otherIncome = expenses
+      .filter(exp => exp.transactionTypeCode === 'OTHER_REV')
+      .reduce((sum, exp) => sum + (exp.totalAmount || 0), 0);
     
     return {
       directSales,
       collections,
       otherIncome
     };
-  }, [invoices, revenues]);
+  }, [invoices, expenses]);
 
   // Robust Monthly Chart Data Calculation
   const monthlyData = useMemo(() => {
@@ -140,29 +189,49 @@ const Dashboard: React.FC = () => {
       if(month >= 0 && month < 12) data[month].revenue += inv.totalAmount;
     });
 
+    // المصروفات والمشتريات (بدون الإيرادات الأخرى)
     expenses.forEach(exp => {
       const month = getMonthFromDateStr(exp.expenseDate);
       if(month >= 0 && month < 12) {
-          data[month].expense += Number(exp.totalAmount) || 0;
+          // لا تحسب الإيرادات الأخرى ضمن المصروفات
+          if (exp.transactionTypeCode !== 'OTHER_REV') {
+              data[month].expense += Number(exp.totalAmount) || 0;
+          }
       }
     });
 
-    // إضافة الإيرادات الأخرى للمخطط الشهري
-    revenues.forEach(rev => {
-      const month = getMonthFromDateStr(rev.revenueDate);
-      if(month >= 0 && month < 12) {
-          data[month].otherIncome += Number(rev.totalAmount) || 0;
-      }
-    });
+    // إضافة الإيرادات الأخرى للمخطط الشهري (من Expenses مع نوع OTHER_REV)
+    expenses
+      .filter(exp => exp.transactionTypeCode === 'OTHER_REV')
+      .forEach(exp => {
+        const month = getMonthFromDateStr(exp.expenseDate);
+        if(month >= 0 && month < 12) {
+            data[month].otherIncome += Number(exp.totalAmount) || 0;
+        }
+      });
 
     return data;
-  }, [invoices, expenses, revenues]);
+  }, [invoices, expenses]);
+
+  // تفاصيل الإيرادات الأخرى
+  const otherIncomeDetails = useMemo(() => {
+    return expenses
+      .filter(exp => exp.transactionTypeCode === 'OTHER_REV')
+      .map(exp => ({
+        id: exp.id,
+        description: exp.description,
+        amount: exp.totalAmount || 0,
+        date: exp.expenseDate
+      }))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [expenses]);
 
   // Invoice Counts Breakdown
   const invoiceStats = useMemo(() => {
-      const cash = invoices.filter(i => i.type === PaymentType.CASH).length;
-      const credit = invoices.filter(i => i.type === PaymentType.CREDIT).length;
-      return { total: invoices.length, cash, credit };
+      // الفواتير الآجلة = الفواتير التي لها مبلغ متبقي > 0
+      const creditInvoices = invoices.filter(i => (i.remainingAmount || 0) > 0);
+      const cashInvoices = invoices.filter(i => (i.remainingAmount || 0) === 0);
+      return { total: invoices.length, cash: cashInvoices.length, credit: creditInvoices.length };
   }, [invoices]);
 
   // Performance Indicators
@@ -186,8 +255,31 @@ const Dashboard: React.FC = () => {
     };
   }, [stats, invoices, products, customers]);
 
-  // Recent Invoices
-  const recentInvoices = useMemo(() => invoices.slice(0, 5), [invoices]);
+  // حساب الفترة الزمنية للبيانات
+  const dataPeriod = useMemo(() => {
+    const allDates: Date[] = [];
+    
+    invoices.forEach(inv => {
+      if (inv.date) allDates.push(new Date(inv.date));
+    });
+    expenses.forEach(exp => {
+      if (exp.expenseDate) allDates.push(new Date(exp.expenseDate));
+    });
+    
+    if (allDates.length === 0) {
+      return { from: null, to: null, text: 'لا توجد بيانات' };
+    }
+    
+    const sortedDates = allDates.sort((a, b) => a.getTime() - b.getTime());
+    const from = sortedDates[0];
+    const to = sortedDates[sortedDates.length - 1];
+    
+    return {
+      from,
+      to,
+      text: `${formatDate(from)} - ${formatDate(to)}`
+    };
+  }, [invoices, expenses]);
 
   // Find max value for scaling chart
   const maxChartValue = Math.max(
@@ -221,18 +313,23 @@ const Dashboard: React.FC = () => {
   }
 
   // Stats Card Component
-  const StatCard = ({ title, value, color, icon: Icon, children }: any) => (
-    <div className="bg-white dark:bg-slate-800/80 p-4 md:p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 flex flex-col justify-between transition-transform hover:scale-[1.02] duration-200 h-full relative overflow-hidden backdrop-blur-sm">
-      <div className="flex items-start justify-between mb-2 z-10">
+  const StatCard = ({ title, value, color, icon: Icon, children, period }: any) => (
+    <div className="bg-white dark:bg-slate-800/80 p-2 sm:p-3 md:p-5 rounded-lg sm:rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 flex flex-col justify-between transition-all hover:shadow-md active:scale-[0.98] md:hover:scale-[1.02] duration-200 h-full relative overflow-hidden backdrop-blur-sm">
+      <div className="flex items-start justify-between gap-1 sm:gap-2 mb-1 sm:mb-2 z-10">
           <div className="flex-1 min-w-0">
-            <p className="text-slate-600 dark:text-slate-300 text-xs md:text-sm font-medium mb-1">{title}</p>
-            <h3 className={`text-xl md:text-2xl font-extrabold ${color}`}>{value.toLocaleString()} <span className="text-[10px] md:text-xs text-slate-400 dark:text-slate-500">{currency}</span></h3>
+            <p className="text-slate-600 dark:text-slate-300 text-[9px] sm:text-xs md:text-sm font-medium mb-0.5 sm:mb-1 leading-tight truncate">{title}</p>
+            <h3 className={`text-base sm:text-xl md:text-3xl font-black ${color} leading-none tracking-tight tabular-nums`} style={{fontFamily: 'system-ui, -apple-system, sans-serif'}}>
+              {value.toLocaleString('en-US')}
+            </h3>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className="text-[7px] sm:text-[9px] md:text-xs text-slate-400 dark:text-slate-500 font-medium">{currency}</span>
+            </div>
           </div>
-          <div className={`p-2 md:p-3 rounded-xl bg-opacity-10 dark:bg-opacity-30 ${color.replace('text', 'bg')} shrink-0`}>
-            <Icon className={color} size={20} />
+          <div className={`p-1 sm:p-2 md:p-3 rounded-md sm:rounded-lg md:rounded-xl bg-opacity-10 dark:bg-opacity-30 ${color.replace('text', 'bg')} shrink-0`}>
+            <Icon className={`${color} w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5`} />
           </div>
       </div>
-      {children && <div className="mt-3 md:mt-4 pt-2 md:pt-3 border-t border-slate-100 dark:border-slate-700/50 z-10">{children}</div>}
+      {children && <div className="mt-1.5 sm:mt-3 md:mt-4 pt-1.5 sm:pt-2 md:pt-3 border-t border-slate-100 dark:border-slate-700/50 z-10">{children}</div>}
     </div>
   );
 
@@ -242,34 +339,51 @@ const Dashboard: React.FC = () => {
   const totalVolume = totalIncomeAll + totalExpenseAll || 1; // avoid divide by zero
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
-            <Activity className="text-primary" size={28} />
-            لوحة التحكم
-          </h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            نظرة عامة شاملة على أداء محلك التجاري - العملة: {currency}
-          </p>
+    <div className="space-y-4 md:space-y-6 px-1 md:px-0">
+      {/* رأس الصفحة المدمج - سطر واحد */}
+      <div className="flex items-center justify-between gap-1">
+        {/* العنوان */}
+        <div className="flex items-center gap-1 md:gap-2 min-w-0">
+          <Activity className="text-primary shrink-0 w-4 h-4 md:w-5 md:h-5" />
+          <h2 className="text-xs sm:text-sm md:text-xl font-bold text-slate-800 dark:text-white truncate">لوحة البيانات</h2>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Customize Button */}
+        
+        {/* المعلومات والأزرار */}
+        <div className="flex items-center gap-0.5 sm:gap-1 md:gap-2 shrink-0">
+          <div className="hidden sm:flex text-[7px] sm:text-[8px] md:text-[10px] bg-blue-50 dark:bg-blue-900/30 px-1 sm:px-1.5 md:px-2 py-0.5 md:py-1 rounded-full text-blue-600 dark:text-blue-400 whitespace-nowrap items-center gap-0.5">
+            📊 {dataPeriod.text}
+          </div>
+          <div className={`text-[7px] sm:text-[8px] md:text-[11px] px-1 sm:px-1.5 md:px-2 py-0.5 md:py-1 rounded-full font-semibold flex items-center gap-0.5 ${stats.netProfit >= 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'}`}>
+            {stats.netProfit >= 0 ? <TrendingUp className="w-2 h-2 sm:w-2.5 sm:h-2.5" /> : <ArrowDownRight className="w-2 h-2 sm:w-2.5 sm:h-2.5" />}
+            <span className="hidden sm:inline">{stats.netProfit >= 0 ? 'إيجابي' : 'مراجعة'}</span>
+          </div>
+          <div className="text-[7px] sm:text-[8px] md:text-[11px] bg-slate-100 dark:bg-slate-800 px-1 sm:px-1.5 md:px-2 py-0.5 md:py-1 rounded-full text-slate-500 dark:text-slate-400 whitespace-nowrap">
+            {formatDate(new Date())}
+          </div>
+          {/* Auto Refresh Indicator */}
+          {autoRefreshEnabled && autoRefreshInterval > 0 && (
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="relative flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 sm:py-1 bg-cyan-50 dark:bg-cyan-900/30 rounded-full shadow-sm text-cyan-600 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-700 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-all shrink-0 overflow-hidden text-[7px] sm:text-[9px] md:text-[10px] font-medium"
+              title={`تحديث تلقائي خلال ${refreshCountdown}ث`}
+            >
+              {/* Progress Background */}
+              <div 
+                className="absolute inset-0 bg-cyan-200 dark:bg-cyan-700/50 transition-all duration-1000 ease-linear"
+                style={{ width: `${((autoRefreshInterval - refreshCountdown) / autoRefreshInterval) * 100}%` }}
+              />
+              <RefreshCw className={`w-2.5 h-2.5 sm:w-3 sm:h-3 relative z-10 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span className="relative z-10 tabular-nums">{refreshCountdown}</span>
+            </button>
+          )}
           <button
             onClick={() => setShowWidgetSettings(true)}
-            className="flex items-center gap-2 text-sm bg-white dark:bg-slate-800 px-3 py-2 rounded-full shadow-sm text-slate-600 dark:text-slate-300 border border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-blue-300 dark:hover:border-blue-500 transition-all"
-            title="تخصيص لوحة التحكم"
+            className="flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 md:w-8 md:h-8 bg-white dark:bg-slate-800 rounded-full shadow-sm text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-blue-400 transition-all shrink-0"
+            title="تخصيص"
           >
-            <Settings2 size={16} className="text-blue-500" />
-            <span className="hidden md:inline">تخصيص</span>
+            <Settings2 className="w-2.5 h-2.5 sm:w-3 sm:h-3 md:w-3.5 md:h-3.5 text-blue-500" />
           </button>
-          <div className={`text-xs px-3 py-1.5 rounded-full font-bold flex items-center gap-1 ${stats.netProfit >= 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'}`}>
-            {stats.netProfit >= 0 ? <TrendingUp size={14} /> : <ArrowDownRight size={14} />}
-            {stats.netProfit >= 0 ? 'أداء إيجابي' : 'يحتاج مراجعة'}
-          </div>
-          <div className="text-sm bg-white dark:bg-slate-800 px-4 py-2 rounded-full shadow-sm text-slate-600 dark:text-slate-300 border border-slate-100 dark:border-slate-700">
-            📅 {formatDateArabic(new Date())}
-          </div>
         </div>
       </div>
 
@@ -282,157 +396,62 @@ const Dashboard: React.FC = () => {
         onReset={handleReset}
       />
 
+      {/* Mobile Auto Refresh Bar */}
+      {autoRefreshEnabled && autoRefreshInterval > 0 && (
+        <button
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="sm:hidden relative w-full flex items-center justify-center gap-2 py-2 bg-gradient-to-r from-cyan-50 to-blue-50 dark:from-cyan-900/20 dark:to-blue-900/20 rounded-lg border border-cyan-200 dark:border-cyan-800 overflow-hidden"
+        >
+          {/* Progress Bar */}
+          <div 
+            className="absolute inset-y-0 right-0 bg-cyan-200/50 dark:bg-cyan-700/30 transition-all duration-1000 ease-linear"
+            style={{ width: `${((autoRefreshInterval - refreshCountdown) / autoRefreshInterval) * 100}%` }}
+          />
+          <RefreshCw className={`w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 relative z-10 ${isRefreshing ? 'animate-spin' : ''}`} />
+          <span className="text-[11px] font-medium text-cyan-700 dark:text-cyan-300 relative z-10">
+            {isRefreshing ? 'جاري التحديث...' : `تحديث تلقائي خلال ${refreshCountdown} ثانية`}
+          </span>
+        </button>
+      )}
+
       {/* Comparison Progress Bar (Generalized from Reports) */}
       {isWidgetVisible('revenue-comparison') && (
-      <div className="bg-white dark:bg-slate-800/80 p-4 md:p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm">
-          <h3 className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-4 flex items-center gap-2">
-              <PieChart size={16} className="text-primary"/> ملخص الأداء المالي
-          </h3>
-          <div className="h-8 md:h-6 w-full bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden flex shadow-inner">
+      <div className="bg-white dark:bg-slate-800/80 p-2 sm:p-3 md:p-6 rounded-lg sm:rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm">
+          <div className="flex items-center justify-between mb-2 sm:mb-3 md:mb-4">
+            <h3 className="text-[10px] sm:text-xs md:text-sm font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 sm:gap-2">
+                <PieChart className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary"/> ملخص الأداء
+            </h3>
+            <span className="text-[7px] sm:text-[9px] md:text-[11px] bg-slate-100 dark:bg-slate-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full text-slate-500 dark:text-slate-400">
+              📅 {formatDateArabic(new Date())}
+            </span>
+          </div>
+          <div className="h-5 sm:h-6 md:h-6 w-full bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden flex shadow-inner">
               <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all duration-1000 ease-out flex items-center justify-center" style={{width: `${(totalIncomeAll / totalVolume) * 100}%`}}>
-                {totalIncomeAll > 0 && <span className="text-[9px] md:text-[10px] text-white font-bold px-1">{((totalIncomeAll / totalVolume) * 100).toFixed(0)}%</span>}
+                {totalIncomeAll > 0 && <span className="text-[7px] sm:text-[8px] md:text-[10px] text-white font-bold px-0.5">{((totalIncomeAll / totalVolume) * 100).toFixed(0)}%</span>}
               </div>
               <div className="h-full bg-gradient-to-r from-rose-400 to-rose-600 transition-all duration-1000 ease-out flex items-center justify-center" style={{width: `${(totalExpenseAll / totalVolume) * 100}%`}}>
-                {totalExpenseAll > 0 && <span className="text-[9px] md:text-[10px] text-white font-bold px-1">{((totalExpenseAll / totalVolume) * 100).toFixed(0)}%</span>}
+                {totalExpenseAll > 0 && <span className="text-[7px] sm:text-[8px] md:text-[10px] text-white font-bold px-0.5">{((totalExpenseAll / totalVolume) * 100).toFixed(0)}%</span>}
               </div>
           </div>
-          <div className="flex flex-col md:flex-row justify-between mt-3 gap-2 text-xs">
-            <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-              <div className="w-3 h-3 rounded-full bg-emerald-500 shrink-0"></div>
-              <span>الدخل: <b>{totalIncomeAll.toLocaleString()}</b> {currency}</span>
+          <div className="grid grid-cols-3 gap-1 sm:gap-2 md:gap-3 mt-2 sm:mt-3 text-[8px] sm:text-[10px] md:text-xs">
+            <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+              <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-500 shrink-0"></div>
+              <span className="truncate"><b>{totalIncomeAll.toLocaleString()}</b></span>
             </div>
-            <div className={`flex items-center gap-2 ${stats.netProfit >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400'}`}>
-              <span>صافي الربح: <b>{stats.netProfit > 0 ? '+' : ''}{stats.netProfit.toLocaleString()}</b> {currency}</span>
+            <div className="flex items-center gap-1 text-rose-600 dark:text-rose-400">
+              <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-rose-500 shrink-0"></div>
+              <span className="truncate"><b>{totalExpenseAll.toLocaleString()}</b></span>
             </div>
-            <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
-              <div className="w-3 h-3 rounded-full bg-rose-500 shrink-0"></div>
-              <span>المصروفات: <b>{totalExpenseAll.toLocaleString()}</b> {currency}</span>
+            <div className={`flex items-center justify-end gap-1 ${stats.netProfit >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400'}`}>
+              <span className="font-bold truncate">{stats.netProfit > 0 ? '+' : ''}{stats.netProfit.toLocaleString()}</span>
             </div>
           </div>
       </div>
       )}
 
-      {/* Plan Usage Card */}
-      {accountUsage && isWidgetVisible('plan-usage') && (
-        <div className="bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-900/20 dark:to-purple-900/20 p-4 md:p-6 rounded-xl shadow-sm border border-violet-200 dark:border-violet-800">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                <Crown className="text-white" size={24} />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                  خطة {accountUsage.planName}
-                  {accountUsage.daysRemaining <= 7 && accountUsage.daysRemaining > 0 && (
-                    <span className="text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full">
-                      ينتهي خلال {accountUsage.daysRemaining} يوم
-                    </span>
-                  )}
-                </h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  استخدام الموارد هذا الشهر
-                </p>
-              </div>
-            </div>
-            <Link 
-              to="/pricing" 
-              className="flex items-center gap-2 text-sm bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:shadow-lg transition-all"
-            >
-              <Zap size={16} />
-              ترقية الخطة
-            </Link>
-          </div>
-          
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {/* Users */}
-            <div className="bg-white/50 dark:bg-slate-800/50 p-3 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1">
-                  <Users size={12} /> المستخدمين
-                </span>
-                <span className="text-xs font-bold text-slate-800 dark:text-white">
-                  {accountUsage.currentUsers}/{accountUsage.maxUsers === -1 ? '∞' : accountUsage.maxUsers}
-                </span>
-              </div>
-              <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all ${
-                    accountUsage.usersPercentage >= 90 ? 'bg-rose-500' : 
-                    accountUsage.usersPercentage >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${Math.min(accountUsage.usersPercentage, 100)}%` }}
-                />
-              </div>
-            </div>
-            
-            {/* Invoices */}
-            <div className="bg-white/50 dark:bg-slate-800/50 p-3 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1">
-                  <FileText size={12} /> الفواتير/شهر
-                </span>
-                <span className="text-xs font-bold text-slate-800 dark:text-white">
-                  {accountUsage.currentMonthInvoices}/{accountUsage.maxInvoices === -1 ? '∞' : accountUsage.maxInvoices}
-                </span>
-              </div>
-              <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all ${
-                    accountUsage.invoicesPercentage >= 90 ? 'bg-rose-500' : 
-                    accountUsage.invoicesPercentage >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${Math.min(accountUsage.invoicesPercentage, 100)}%` }}
-                />
-              </div>
-            </div>
-            
-            {/* Customers */}
-            <div className="bg-white/50 dark:bg-slate-800/50 p-3 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1">
-                  <Users size={12} /> العملاء
-                </span>
-                <span className="text-xs font-bold text-slate-800 dark:text-white">
-                  {accountUsage.currentCustomers}/{accountUsage.maxCustomers === -1 ? '∞' : accountUsage.maxCustomers}
-                </span>
-              </div>
-              <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all ${
-                    accountUsage.customersPercentage >= 90 ? 'bg-rose-500' : 
-                    accountUsage.customersPercentage >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${Math.min(accountUsage.customersPercentage, 100)}%` }}
-                />
-              </div>
-            </div>
-            
-            {/* Products */}
-            <div className="bg-white/50 dark:bg-slate-800/50 p-3 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1">
-                  <Package size={12} /> المنتجات
-                </span>
-                <span className="text-xs font-bold text-slate-800 dark:text-white">
-                  {accountUsage.currentProducts}/{accountUsage.maxProducts === -1 ? '∞' : accountUsage.maxProducts}
-                </span>
-              </div>
-              <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all ${
-                    accountUsage.productsPercentage >= 90 ? 'bg-rose-500' : 
-                    accountUsage.productsPercentage >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${Math.min(accountUsage.productsPercentage, 100)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2 md:gap-4">
         
         {/* Total Revenue with Breakdown */}
         <StatCard 
@@ -440,19 +459,20 @@ const Dashboard: React.FC = () => {
           value={totalIncomeAll} 
           color="text-emerald-600 dark:text-emerald-400" 
           icon={Wallet}
+          period={dataPeriod.text}
         >
-            <div className="space-y-2 text-xs">
+            <div className="space-y-1 sm:space-y-1.5">
                 <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                    <span className="flex items-center gap-1"><Banknote size={12} className="text-emerald-500"/> مبيعات فورية</span>
-                    <span className="font-bold text-emerald-600 dark:text-emerald-400">{revenueBreakdown.directSales.toLocaleString()}</span>
+                    <span className="flex items-center gap-0.5 text-[8px] sm:text-[10px] md:text-xs"><Banknote className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-500"/> فوري</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400 text-[10px] sm:text-xs" style={{fontFamily: 'system-ui'}}>{revenueBreakdown.directSales.toLocaleString('en-US')}</span>
                 </div>
                 <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                    <span className="flex items-center gap-1"><RefreshCw size={12} className="text-blue-500"/> تحصيل آجل</span>
-                    <span className="font-bold text-blue-600 dark:text-blue-400">{revenueBreakdown.collections.toLocaleString()}</span>
+                    <span className="flex items-center gap-0.5 text-[8px] sm:text-[10px] md:text-xs"><RefreshCw className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-blue-500"/> آجل</span>
+                    <span className="font-bold text-blue-600 dark:text-blue-400 text-[10px] sm:text-xs" style={{fontFamily: 'system-ui'}}>{revenueBreakdown.collections.toLocaleString('en-US')}</span>
                 </div>
                 <div className="flex justify-between items-center text-slate-600 dark:text-slate-400 border-t border-dashed dark:border-slate-600 pt-1">
-                    <span className="flex items-center gap-1"><TrendingUp size={12} className="text-violet-500"/> إيرادات أخرى</span>
-                    <span className="font-bold text-violet-600 dark:text-violet-400">{revenueBreakdown.otherIncome.toLocaleString()}</span>
+                    <span className="flex items-center gap-0.5 text-[8px] sm:text-[10px] md:text-xs"><TrendingUp className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-violet-500"/> أخرى</span>
+                    <span className="font-bold text-violet-600 dark:text-violet-400 text-[10px] sm:text-xs" style={{fontFamily: 'system-ui'}}>{revenueBreakdown.otherIncome.toLocaleString('en-US')}</span>
                 </div>
             </div>
         </StatCard>
@@ -461,16 +481,17 @@ const Dashboard: React.FC = () => {
           title="الديون المستحقة (للمحل)" 
           value={stats.outstandingDebts} 
           color="text-amber-600 dark:text-amber-400" 
-          icon={CreditCard} 
+          icon={CreditCard}
+          period={dataPeriod.text}
         >
-             <div className="space-y-2 text-xs">
+             <div className="space-y-1 sm:space-y-1.5">
                <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                 <span>فواتير آجلة</span>
-                 <span className="font-bold text-amber-600 dark:text-amber-400">{invoiceStats.credit}</span>
+                 <span className="text-[8px] sm:text-[10px] md:text-xs">فواتير آجلة</span>
+                 <span className="font-bold text-amber-600 dark:text-amber-400 text-[10px] sm:text-xs" style={{fontFamily: 'system-ui'}}>{invoiceStats.credit}</span>
                </div>
                <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                 <span>نسبة التحصيل</span>
-                 <span className={`font-bold ${Number(performanceIndicators.collectionRate) >= 70 ? 'text-emerald-600' : 'text-orange-600'}`}>{performanceIndicators.collectionRate}%</span>
+                 <span className="text-[8px] sm:text-[10px] md:text-xs">نسبة التحصيل</span>
+                 <span className={`font-bold text-[10px] sm:text-xs ${Number(performanceIndicators.collectionRate) >= 70 ? 'text-emerald-600' : 'text-orange-600'}`} style={{fontFamily: 'system-ui'}}>{performanceIndicators.collectionRate}%</span>
                </div>
              </div>
         </StatCard>
@@ -479,16 +500,17 @@ const Dashboard: React.FC = () => {
           title="المصروفات والمشتريات" 
           value={totalExpenseAll} 
           color="text-rose-600 dark:text-rose-400" 
-          icon={ArrowDownRight} 
+          icon={ArrowDownRight}
+          period={dataPeriod.text}
         >
-            <div className="space-y-2 text-xs">
+            <div className="space-y-1 sm:space-y-1.5">
                 <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                    <span className="flex items-center gap-1"><Receipt size={12} className="text-rose-500"/> مصروفات تشغيل</span>
-                    <span className="font-bold text-rose-600 dark:text-rose-400">{stats.totalExpenses.toLocaleString()}</span>
+                    <span className="flex items-center gap-0.5 text-[8px] sm:text-[10px] md:text-xs"><Receipt className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-rose-500"/> تشغيل</span>
+                    <span className="font-bold text-rose-600 dark:text-rose-400 text-[10px] sm:text-xs" style={{fontFamily: 'system-ui'}}>{stats.totalExpenses.toLocaleString('en-US')}</span>
                 </div>
                 <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                    <span className="flex items-center gap-1"><ShoppingCart size={12} className="text-orange-500"/> مشتريات بضاعة</span>
-                    <span className="font-bold text-orange-600 dark:text-orange-400">{stats.totalPurchases.toLocaleString()}</span>
+                    <span className="flex items-center gap-0.5 text-[8px] sm:text-[10px] md:text-xs"><ShoppingCart className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-orange-500"/> مشتريات</span>
+                    <span className="font-bold text-orange-600 dark:text-orange-400 text-[10px] sm:text-xs" style={{fontFamily: 'system-ui'}}>{stats.totalPurchases.toLocaleString('en-US')}</span>
                 </div>
             </div>
         </StatCard>
@@ -497,30 +519,36 @@ const Dashboard: React.FC = () => {
           title="صافي الربح" 
           value={stats.netProfit} 
           color={stats.netProfit >= 0 ? "text-primary dark:text-blue-400" : "text-rose-600 dark:text-rose-400"} 
-          icon={stats.netProfit >= 0 ? Award : AlertTriangle} 
+          icon={stats.netProfit >= 0 ? Award : AlertTriangle}
+          period={dataPeriod.text}
         >
-            <div className="space-y-2 text-xs">
+            <div className="space-y-1 sm:space-y-1.5">
               <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                <span>هامش الربح</span>
-                <span className={`font-bold ${Number(performanceIndicators.profitMargin) >= 20 ? 'text-emerald-600' : Number(performanceIndicators.profitMargin) >= 0 ? 'text-amber-600' : 'text-rose-600'}`}>{performanceIndicators.profitMargin}%</span>
+                <span className="text-[8px] sm:text-[10px] md:text-xs">هامش الربح</span>
+                <span className={`font-bold text-[10px] sm:text-xs ${Number(performanceIndicators.profitMargin) >= 20 ? 'text-emerald-600' : Number(performanceIndicators.profitMargin) >= 0 ? 'text-amber-600' : 'text-rose-600'}`} style={{fontFamily: 'system-ui'}}>{performanceIndicators.profitMargin}%</span>
               </div>
               <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                <span>متوسط الفاتورة</span>
-                <span className="font-bold text-slate-800 dark:text-slate-200">{performanceIndicators.avgInvoiceValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                <span className="text-[8px] sm:text-[10px] md:text-xs">متوسط الفاتورة</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200 text-[10px] sm:text-xs" style={{fontFamily: 'system-ui'}}>{performanceIndicators.avgInvoiceValue.toLocaleString('en-US', {maximumFractionDigits: 0})}</span>
               </div>
             </div>
         </StatCard>
       </div>
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 sm:gap-4 md:gap-6">
         {/* Simple Bar Chart */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700">
-           <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-6 flex items-center gap-2">
-             <TrendingUp size={20} className="text-primary dark:text-blue-400"/>
-             الأداء المالي الشهري (السنة الحالية)
-           </h3>
-           <div className="h-64 flex items-end gap-2 md:gap-4 justify-between px-2">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-2 sm:p-3 md:p-6 rounded-lg sm:rounded-xl shadow-sm border border-slate-100 dark:border-slate-700">
+           <div className="flex items-center justify-between mb-2 sm:mb-4 md:mb-6">
+             <h3 className="text-[10px] sm:text-sm md:text-lg font-bold text-slate-800 dark:text-white flex items-center gap-1 sm:gap-2">
+               <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4 md:w-5 md:h-5 text-primary dark:text-blue-400"/>
+               <span className="truncate">الأداء الشهري</span>
+             </h3>
+             <span className="text-[7px] sm:text-[9px] md:text-[10px] bg-slate-100 dark:bg-slate-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full text-slate-500 dark:text-slate-400">
+               {new Date().getFullYear()}
+             </span>
+           </div>
+           <div className="h-32 sm:h-48 md:h-64 flex items-end gap-0.5 sm:gap-1 md:gap-4 justify-between px-0.5 sm:px-2">
               {monthlyData.map((d, i) => (
                 <div key={i} className="flex flex-col justify-end items-center gap-1 h-full flex-1 group relative">
                    {/* Tooltip */}
@@ -547,116 +575,142 @@ const Dashboard: React.FC = () => {
                         style={{ height: `${(d.expense / maxChartValue) * 100}%` }}
                       ></div>
                    </div>
-                   <span className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 font-medium">{i + 1}</span>
+                   <span className="text-[6px] sm:text-[9px] md:text-xs text-slate-500 dark:text-slate-400 font-medium">{i + 1}</span>
                 </div>
               ))}
            </div>
-           <div className="mt-4 flex justify-center gap-6 text-xs text-slate-600 dark:text-slate-400">
-              <div className="flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-emerald-400 to-emerald-600 rounded-sm"></div> المبيعات</div>
-              <div className="flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-blue-400 to-blue-600 rounded-sm"></div> إيرادات أخرى</div>
-              <div className="flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-rose-400 to-rose-600 rounded-sm"></div> المصروفات</div>
+           <div className="mt-2 sm:mt-3 md:mt-4 flex flex-wrap justify-center gap-2 sm:gap-3 md:gap-6 text-[8px] sm:text-[10px] md:text-xs text-slate-600 dark:text-slate-400">
+              <div className="flex items-center gap-1"><div className="w-2 h-2 sm:w-2.5 sm:h-2.5 bg-gradient-to-r from-emerald-400 to-emerald-600 rounded-sm"></div> مبيعات</div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 sm:w-2.5 sm:h-2.5 bg-gradient-to-r from-blue-400 to-blue-600 rounded-sm"></div> أخرى</div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 sm:w-2.5 sm:h-2.5 bg-gradient-to-r from-rose-400 to-rose-600 rounded-sm"></div> مصروفات</div>
            </div>
         </div>
 
         {/* Top Products / Inventory Summary */}
-        <div className="space-y-6">
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700">
-                <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
-                    <Award size={20} className="text-yellow-500" />
-                    المنتجات الأكثر مبيعاً
+        <div className="space-y-2 sm:space-y-4 md:space-y-6">
+            <div className="bg-white dark:bg-slate-800 p-2 sm:p-3 md:p-6 rounded-lg sm:rounded-xl shadow-sm border border-slate-100 dark:border-slate-700">
+                <h3 className="text-[10px] sm:text-sm md:text-lg font-bold text-slate-800 dark:text-white mb-2 sm:mb-3 md:mb-4 flex items-center gap-1 sm:gap-2">
+                    <Award className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-yellow-500" />
+                    الأكثر مبيعاً
                 </h3>
-                <div className="space-y-3">
+                <div className="space-y-1.5 sm:space-y-2 md:space-y-3">
                     {topProducts.map(([name, count], idx) => (
-                        <div key={name} className="flex justify-between items-center text-sm">
-                            <span className="flex items-center gap-2">
-                                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm ${
+                        <div key={name} className="flex justify-between items-center text-[10px] sm:text-xs md:text-sm">
+                            <span className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+                                <span className={`w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 rounded-full flex items-center justify-center text-[8px] sm:text-[9px] md:text-[10px] font-bold shadow-sm shrink-0 ${
                                   idx === 0 ? 'bg-gradient-to-br from-yellow-400 to-yellow-600 text-white' : 
                                   idx === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-400 text-white' :
                                   idx === 2 ? 'bg-gradient-to-br from-amber-500 to-amber-700 text-white' :
                                   'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
                                 }`}>{idx + 1}</span>
-                                <span className="text-slate-800 dark:text-slate-200">{name}</span>
+                                <span className="text-slate-800 dark:text-slate-200 truncate max-w-[80px] sm:max-w-none">{name}</span>
                             </span>
-                            <span className="font-bold text-primary dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded text-xs">{count} وحدة</span>
+                            <span className="font-bold text-primary dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-1 sm:px-1.5 md:px-2 py-0.5 rounded text-[8px] sm:text-[10px] md:text-xs whitespace-nowrap">{count}</span>
                         </div>
                     ))}
-                    {topProducts.length === 0 && <p className="text-slate-400 text-center text-sm py-4">لا توجد بيانات مبيعات كافية</p>}
+                    {topProducts.length === 0 && <p className="text-slate-400 text-center text-[10px] sm:text-xs md:text-sm py-2 sm:py-3 md:py-4">لا توجد بيانات</p>}
                 </div>
             </div>
 
             {/* Performance Metrics */}
-            <div className="bg-white dark:bg-gradient-to-br dark:from-slate-800 dark:to-slate-900 p-5 rounded-xl shadow-sm border border-slate-200 dark:border-transparent dark:shadow-lg">
-                <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-slate-700 dark:text-white dark:opacity-90">
-                    <Target size={16} className="text-indigo-500 dark:text-white" />
+            <div className="bg-white dark:bg-gradient-to-br dark:from-slate-800 dark:to-slate-900 p-2 sm:p-3 md:p-5 rounded-lg sm:rounded-xl shadow-sm border border-slate-200 dark:border-transparent dark:shadow-lg">
+                <h3 className="text-[10px] sm:text-xs md:text-sm font-bold mb-2 sm:mb-3 md:mb-4 flex items-center gap-1 sm:gap-2 text-slate-700 dark:text-white dark:opacity-90">
+                    <Target className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-indigo-500 dark:text-white" />
                     مؤشرات الأداء
                 </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-50 dark:bg-white/10 p-3 rounded-lg border border-slate-100 dark:border-transparent">
-                    <p className="text-[10px] text-slate-500 dark:text-white/70">هامش الربح</p>
-                    <p className={`text-lg font-bold ${Number(performanceIndicators.profitMargin) >= 20 ? 'text-emerald-600 dark:text-emerald-400' : Number(performanceIndicators.profitMargin) >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{performanceIndicators.profitMargin}%</p>
+                <div className="grid grid-cols-2 gap-1.5 sm:gap-2 md:gap-3">
+                  <div className="bg-slate-50 dark:bg-white/10 p-1.5 sm:p-2 md:p-3 rounded-md sm:rounded-lg border border-slate-100 dark:border-transparent">
+                    <p className="text-[7px] sm:text-[9px] md:text-[10px] text-slate-500 dark:text-white/70">هامش الربح</p>
+                    <p className={`text-xs sm:text-sm md:text-lg font-bold ${Number(performanceIndicators.profitMargin) >= 20 ? 'text-emerald-600 dark:text-emerald-400' : Number(performanceIndicators.profitMargin) >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{performanceIndicators.profitMargin}%</p>
                   </div>
-                  <div className="bg-slate-50 dark:bg-white/10 p-3 rounded-lg border border-slate-100 dark:border-transparent">
-                    <p className="text-[10px] text-slate-500 dark:text-white/70">نسبة التحصيل</p>
-                    <p className={`text-lg font-bold ${Number(performanceIndicators.collectionRate) >= 80 ? 'text-emerald-600 dark:text-emerald-400' : Number(performanceIndicators.collectionRate) >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{performanceIndicators.collectionRate}%</p>
+                  <div className="bg-slate-50 dark:bg-white/10 p-1.5 sm:p-2 md:p-3 rounded-md sm:rounded-lg border border-slate-100 dark:border-transparent">
+                    <p className="text-[7px] sm:text-[9px] md:text-[10px] text-slate-500 dark:text-white/70">نسبة التحصيل</p>
+                    <p className={`text-xs sm:text-sm md:text-lg font-bold ${Number(performanceIndicators.collectionRate) >= 80 ? 'text-emerald-600 dark:text-emerald-400' : Number(performanceIndicators.collectionRate) >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{performanceIndicators.collectionRate}%</p>
                   </div>
-                  <div className="bg-slate-50 dark:bg-white/10 p-3 rounded-lg border border-slate-100 dark:border-transparent">
-                    <p className="text-[10px] text-slate-500 dark:text-white/70">متوسط الفاتورة</p>
-                    <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{performanceIndicators.avgInvoiceValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+                  <div className="bg-slate-50 dark:bg-white/10 p-1.5 sm:p-2 md:p-3 rounded-md sm:rounded-lg border border-slate-100 dark:border-transparent">
+                    <p className="text-[7px] sm:text-[9px] md:text-[10px] text-slate-500 dark:text-white/70">متوسط الفاتورة</p>
+                    <p className="text-xs sm:text-sm md:text-lg font-bold text-blue-600 dark:text-blue-400">{performanceIndicators.avgInvoiceValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
                   </div>
-                  <div className="bg-slate-50 dark:bg-white/10 p-3 rounded-lg border border-slate-100 dark:border-transparent">
-                    <p className="text-[10px] text-slate-500 dark:text-white/70">عدد المبيعات</p>
-                    <p className="text-lg font-bold text-violet-600 dark:text-violet-400">{performanceIndicators.totalSales}</p>
+                  <div className="bg-slate-50 dark:bg-white/10 p-1.5 sm:p-2 md:p-3 rounded-md sm:rounded-lg border border-slate-100 dark:border-transparent">
+                    <p className="text-[7px] sm:text-[9px] md:text-[10px] text-slate-500 dark:text-white/70">عدد المبيعات</p>
+                    <p className="text-xs sm:text-sm md:text-lg font-bold text-violet-600 dark:text-violet-400">{performanceIndicators.totalSales}</p>
                   </div>
                 </div>
             </div>
 
             {/* General Stats Grid (New) */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-1.5 sm:gap-2 md:gap-4">
                {/* Products Count */}
-               <div className="bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/30 dark:to-cyan-900/30 p-4 rounded-xl shadow-sm border border-teal-100 dark:border-teal-800 col-span-2">
-                  <h3 className="text-xs font-bold text-teal-600 dark:text-teal-400 mb-1 flex items-center gap-1"><Package size={14}/> إجمالي المنتجات</h3>
+               <div className="bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/30 dark:to-cyan-900/30 p-1.5 sm:p-2 md:p-4 rounded-lg sm:rounded-xl shadow-sm border border-teal-100 dark:border-teal-800 col-span-2">
+                  <h3 className="text-[8px] sm:text-[10px] md:text-xs font-bold text-teal-600 dark:text-teal-400 mb-0.5 sm:mb-1 flex items-center gap-0.5 sm:gap-1"><Package className="w-2.5 h-2.5 sm:w-3 sm:h-3"/> المنتجات</h3>
                   <div className="flex justify-between items-end">
-                      <p className="text-2xl font-bold text-teal-700 dark:text-teal-300">{products.length} <span className="text-xs font-normal text-teal-500">صنف</span></p>
+                      <p className="text-base sm:text-xl md:text-2xl font-bold text-teal-700 dark:text-teal-300">{products.length} <span className="text-[8px] sm:text-[10px] md:text-xs font-normal text-teal-500">صنف</span></p>
                       {performanceIndicators.lowStockProducts > 0 ? (
-                        <div className="text-[10px] text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 px-2 py-1 rounded flex items-center gap-1">
-                          <AlertTriangle size={10} /> {performanceIndicators.lowStockProducts} منخفض
+                        <div className="text-[7px] sm:text-[9px] md:text-[10px] text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 px-1 sm:px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                          <AlertTriangle className="w-2 h-2 sm:w-2.5 sm:h-2.5" /> {performanceIndicators.lowStockProducts} منخفض
                         </div>
                       ) : (
-                        <div className="text-[10px] text-teal-600 dark:text-teal-400 bg-teal-100 dark:bg-teal-900/30 px-2 py-1 rounded flex items-center gap-1">
-                          <CheckCircle size={10} /> مخزون جيد
+                        <div className="text-[7px] sm:text-[9px] md:text-[10px] text-teal-600 dark:text-teal-400 bg-teal-100 dark:bg-teal-900/30 px-1 sm:px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                          <CheckCircle className="w-2 h-2 sm:w-2.5 sm:h-2.5" /> مخزون جيد
                         </div>
                       )}
                   </div>
                </div>
 
+               {/* Other Income Details */}
+               <div className="bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-900/30 dark:to-blue-900/30 p-1.5 sm:p-2 md:p-4 rounded-lg sm:rounded-xl shadow-sm border border-indigo-100 dark:border-indigo-800 col-span-2">
+                  <h3 className="text-[8px] sm:text-[10px] md:text-xs font-bold text-indigo-600 dark:text-indigo-400 mb-1 sm:mb-2 flex items-center gap-0.5 sm:gap-1"><TrendingUp className="w-2.5 h-2.5 sm:w-3 sm:h-3"/> الإيرادات الأخرى</h3>
+                  <div className="space-y-1 sm:space-y-1.5">
+                    {otherIncomeDetails.length > 0 ? (
+                      otherIncomeDetails.map((item) => (
+                        <div key={item.id} className="flex justify-between items-center text-[9px] sm:text-xs bg-white/50 dark:bg-white/5 p-1 sm:p-1.5 rounded-md sm:rounded-lg">
+                          <span className="text-slate-700 dark:text-slate-300 truncate flex-1 max-w-[100px] sm:max-w-none">{item.description}</span>
+                          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+                            <span className="hidden sm:inline text-[8px] sm:text-[9px] text-slate-500 dark:text-slate-400">{formatDate(item.date)}</span>
+                            <span className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/30 px-1 sm:px-1.5 py-0.5 rounded text-[8px] sm:text-[10px]">{item.amount.toLocaleString('en-US')}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-slate-400 text-center text-[9px] sm:text-xs py-1.5 sm:py-2">لا توجد</p>
+                    )}
+                    {otherIncomeDetails.length > 0 && (
+                      <div className="flex justify-between items-center pt-1 sm:pt-1.5 border-t border-indigo-200 dark:border-indigo-700 mt-1">
+                        <span className="text-[8px] sm:text-[10px] md:text-xs font-bold text-indigo-700 dark:text-indigo-300">المجموع</span>
+                        <span className="font-bold text-indigo-700 dark:text-indigo-300 text-[10px] sm:text-xs">{otherIncomeDetails.reduce((sum, item) => sum + item.amount, 0).toLocaleString('en-US')}</span>
+                      </div>
+                    )}
+                  </div>
+               </div>
+
                {/* Customers Count */}
-               <div className="bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-900/30 dark:to-purple-900/30 p-4 rounded-xl shadow-sm border border-violet-100 dark:border-violet-800 col-span-2">
-                  <h3 className="text-xs font-bold text-violet-600 dark:text-violet-400 mb-1 flex items-center gap-1"><Users size={14}/> إجمالي العملاء</h3>
+               <div className="bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-900/30 dark:to-purple-900/30 p-1.5 sm:p-2 md:p-4 rounded-lg sm:rounded-xl shadow-sm border border-violet-100 dark:border-violet-800 col-span-2">
+                  <h3 className="text-[8px] sm:text-[10px] md:text-xs font-bold text-violet-600 dark:text-violet-400 mb-0.5 sm:mb-1 flex items-center gap-0.5 sm:gap-1"><Users className="w-2.5 h-2.5 sm:w-3 sm:h-3"/> العملاء</h3>
                   <div className="flex justify-between items-end">
-                      <p className="text-2xl font-bold text-violet-700 dark:text-violet-300">{customers.length} <span className="text-xs font-normal text-violet-500">عميل</span></p>
-                      <div className="text-[10px] text-violet-600 dark:text-violet-400 bg-violet-100 dark:bg-violet-900/30 px-2 py-1 rounded flex items-center gap-1">
-                        <CheckCircle size={10} /> {performanceIndicators.activeCustomers} نشط
+                      <p className="text-base sm:text-xl md:text-2xl font-bold text-violet-700 dark:text-violet-300">{customers.length} <span className="text-[8px] sm:text-[10px] md:text-xs font-normal text-violet-500">عميل</span></p>
+                      <div className="text-[7px] sm:text-[9px] md:text-[10px] text-violet-600 dark:text-violet-400 bg-violet-100 dark:bg-violet-900/30 px-1 sm:px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                        <CheckCircle className="w-2 h-2 sm:w-2.5 sm:h-2.5" /> {performanceIndicators.activeCustomers} نشط
                       </div>
                   </div>
                </div>
 
                {/* Invoices Breakdown */}
-               <div className="bg-gradient-to-br from-slate-50 to-gray-50 dark:from-slate-800 dark:to-gray-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 col-span-2 space-y-3">
-                   <h3 className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1"><FileText size={14}/> تفاصيل الفواتير</h3>
+               <div className="bg-gradient-to-br from-slate-50 to-gray-50 dark:from-slate-800 dark:to-gray-800 p-1.5 sm:p-2 md:p-4 rounded-lg sm:rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 col-span-2 space-y-1 sm:space-y-2">
+                   <h3 className="text-[8px] sm:text-[10px] md:text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 sm:mb-1.5 flex items-center gap-0.5 sm:gap-1"><FileText className="w-2.5 h-2.5 sm:w-3 sm:h-3"/> الفواتير</h3>
                    
-                   <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
-                      <span className="text-sm font-bold text-slate-700 dark:text-slate-300">العدد الكلي</span>
-                      <span className="text-sm font-bold bg-primary/10 text-primary px-3 py-0.5 rounded-full">{invoiceStats.total}</span>
+                   <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-1 sm:pb-1.5">
+                      <span className="text-[10px] sm:text-xs font-bold text-slate-700 dark:text-slate-300">العدد الكلي</span>
+                      <span className="text-[10px] sm:text-xs font-bold bg-primary/10 text-primary px-1.5 sm:px-2 py-0.5 rounded-full">{invoiceStats.total}</span>
                    </div>
 
                    <div className="flex justify-between items-center">
-                      <span className="text-xs flex items-center gap-1 text-slate-600 dark:text-slate-400"><Banknote size={12} className="text-emerald-500"/> كاش (نقدي)</span>
-                      <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded">{invoiceStats.cash}</span>
+                      <span className="text-[8px] sm:text-[10px] md:text-xs flex items-center gap-0.5 text-slate-600 dark:text-slate-400"><Banknote className="w-2 h-2 sm:w-2.5 sm:h-2.5 text-emerald-500"/> كاش</span>
+                      <span className="text-[8px] sm:text-[10px] md:text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-1 sm:px-1.5 py-0.5 rounded">{invoiceStats.cash}</span>
                    </div>
 
                    <div className="flex justify-between items-center">
-                      <span className="text-xs flex items-center gap-1 text-slate-600 dark:text-slate-400"><Clock size={12} className="text-amber-500"/> آجل (ذمم)</span>
-                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded">{invoiceStats.credit}</span>
+                      <span className="text-[8px] sm:text-[10px] md:text-xs flex items-center gap-0.5 text-slate-600 dark:text-slate-400"><Clock className="w-2 h-2 sm:w-2.5 sm:h-2.5 text-amber-500"/> آجل</span>
+                      <span className="text-[8px] sm:text-[10px] md:text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-1 sm:px-1.5 py-0.5 rounded">{invoiceStats.credit}</span>
                    </div>
                </div>
             </div>

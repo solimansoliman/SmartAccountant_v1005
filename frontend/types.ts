@@ -149,6 +149,10 @@ export interface AppSettings {
   autoSync: boolean; 
   defaultViewMode: 'grid' | 'table'; // طريقة العرض الافتراضية
   nationalities: string[]; // قائمة الجنسيات
+  // إعدادات تنسيق التاريخ والوقت
+  dateFormat: 'DD-MM-YYYY' | 'MM-DD-YYYY' | 'YYYY-MM-DD'; // تنسيق التاريخ الرقمي
+  timeFormat: '24h' | '12h'; // تنسيق الوقت: 24 ساعة أو 12 ساعة (ص/م)
+  dateDisplayStyle: 'numeric' | 'arabic'; // نمط عرض التاريخ: رقمي أو عربي نصي
 }
 
 export interface SystemPermissions {

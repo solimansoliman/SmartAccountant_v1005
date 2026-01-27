@@ -727,7 +727,8 @@ const mapApiToFrontendRevenue = (apiRevenue: ApiRevenue): FrontendRevenue => ({
   description: apiRevenue.description,
   amount: apiRevenue.amount,
   taxAmount: apiRevenue.taxAmount,
-  totalAmount: apiRevenue.totalAmount,
+  // استخدام amount + taxAmount كـ totalAmount لأن netAmount قد يكون 0
+  totalAmount: apiRevenue.totalAmount || (apiRevenue.amount + (apiRevenue.taxAmount || 0)),
   paymentMethod: apiRevenue.paymentMethod,
   reference: apiRevenue.reference,
   status: apiRevenue.status,

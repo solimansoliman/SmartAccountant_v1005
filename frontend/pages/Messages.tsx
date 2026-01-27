@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Mail, Send, Inbox, CheckCheck, Trash2, Loader2, AlertTriangle, Clock, User, ChevronLeft, X, Plus, Search, RefreshCw, Users, Building2, Globe } from 'lucide-react';
+import { Mail, Send, Inbox, CheckCheck, Trash2, Loader2, AlertTriangle, Clock, User, ChevronLeft, X, Plus, Search, RefreshCw, Users, Building2, Globe, Calendar } from 'lucide-react';
 import { messagesApi, ApiMessage, getBaseUrl } from '../services/apiService';
 import { useNotification } from '../context/NotificationContext';
 import { formatDateTime, formatDate, formatTime } from '../services/dateService';
@@ -44,6 +44,17 @@ const Messages: React.FC = () => {
   const [priority, setPriority] = useState<'Low' | 'Normal' | 'High' | 'Urgent'>('Normal');
   const [searchQuery, setSearchQuery] = useState('');
   const [userSearchQuery, setUserSearchQuery] = useState('');
+  
+  // تحديد فترة سنة كقيمة افتراضية
+  const getDefaultDateFrom = () => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.toISOString().split('T')[0];
+  };
+  const getDefaultDateTo = () => new Date().toISOString().split('T')[0];
+  
+  const [dateFrom, setDateFrom] = useState(getDefaultDateFrom);
+  const [dateTo, setDateTo] = useState(getDefaultDateTo);
 
   // حدود عدد الحروف
   const [maxMessageLength, setMaxMessageLength] = useState<number>(1000);
@@ -329,10 +340,29 @@ const Messages: React.FC = () => {
 
   const unreadCount = messages.filter(m => !m.isRead && folder === 'inbox').length;
 
-  const filteredMessages = messages.filter(m => 
-    m.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (folder === 'inbox' ? m.senderName : m.recipientName)?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredMessages = useMemo(() => {
+    return messages.filter(m => {
+      // تصفية بالبحث
+      const matchesSearch = !searchQuery || 
+        m.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (folder === 'inbox' ? m.senderName : m.recipientName)?.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      // تصفية بالتاريخ
+      const msgDate = new Date(m.createdAt);
+      const matchesDateFrom = !dateFrom || msgDate >= new Date(dateFrom);
+      const matchesDateTo = !dateTo || msgDate <= new Date(dateTo + 'T23:59:59');
+      
+      return matchesSearch && matchesDateFrom && matchesDateTo;
+    });
+  }, [messages, searchQuery, folder, dateFrom, dateTo]);
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setDateFrom(getDefaultDateFrom());
+    setDateTo(getDefaultDateTo());
+  };
+
+  const hasFilters = !!searchQuery;
 
   if (loading && !selectedMessage) {
     return (
@@ -404,16 +434,55 @@ const Messages: React.FC = () => {
             </button>
           </div>
 
-          {/* Search */}
-          <div className="relative">
-            <Search size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="بحث في الرسائل..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pr-10 pl-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none"
-            />
+          {/* Search and Date Filter */}
+          <div className="space-y-2">
+            <div className="relative">
+              <Search size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="بحث في الرسائل..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full pr-10 pl-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none"
+              />
+            </div>
+            
+            {/* Date Filters */}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Calendar size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={e => setDateFrom(e.target.value)}
+                  className="w-full pr-8 pl-2 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none text-xs"
+                  title="من تاريخ"
+                />
+              </div>
+              <div className="relative flex-1">
+                <Calendar size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={e => setDateTo(e.target.value)}
+                  className="w-full pr-8 pl-2 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none text-xs"
+                  title="إلى تاريخ"
+                />
+              </div>
+            </div>
+            
+            {hasFilters && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500">{filteredMessages.length} من {messages.length}</span>
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 hover:underline"
+                >
+                  <X size={12} />
+                  مسح الفلاتر
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Messages List */}

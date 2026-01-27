@@ -241,6 +241,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoSync: true,
   defaultViewMode: 'grid', // الافتراضي: شبكي
   nationalities: DEFAULT_NATIONALITIES,
+  dateFormat: 'DD-MM-YYYY', // التنسيق الافتراضي: يوم-شهر-سنة
+  timeFormat: '24h', // الافتراضي: 24 ساعة
+  dateDisplayStyle: 'numeric', // الافتراضي: رقمي (27-01-2026)
 };
 
 export const getAppSettings = (): AppSettings => {

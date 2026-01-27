@@ -5,6 +5,9 @@ import { systemSettingsApi } from '../services/adminApi';
 
 type ViewMode = 'grid' | 'table';
 type DarkModePreference = 'light' | 'dark' | 'auto' | 'system';
+type DateFormat = 'DD-MM-YYYY' | 'MM-DD-YYYY' | 'YYYY-MM-DD';
+type TimeFormat = '24h' | '12h';
+type DateDisplayStyle = 'numeric' | 'arabic';
 
 interface SettingsContextType {
   currency: string;
@@ -35,6 +38,13 @@ interface SettingsContextType {
   // New: Sync Duration
   syncDuration: number;
   setSyncDuration: (ms: number) => void;
+  // New: Date & Time Format
+  dateFormat: DateFormat;
+  setDateFormat: (format: DateFormat) => void;
+  timeFormat: TimeFormat;
+  setTimeFormat: (format: TimeFormat) => void;
+  dateDisplayStyle: DateDisplayStyle;
+  setDateDisplayStyle: (style: DateDisplayStyle) => void;
   // Loading state
   isLoadingSettings: boolean;
 }
@@ -198,6 +208,19 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     updateSettings({ nationalities: settings.nationalities.filter(n => n !== nationality) });
   };
 
+  // Date & Time Format Logic
+  const setDateFormat = (format: DateFormat) => {
+    updateSettings({ dateFormat: format });
+  };
+
+  const setTimeFormat = (format: TimeFormat) => {
+    updateSettings({ timeFormat: format });
+  };
+
+  const setDateDisplayStyle = (style: DateDisplayStyle) => {
+    updateSettings({ dateDisplayStyle: style });
+  };
+
   // Permission Logic - supports boolean toggle or direct value assignment
   const togglePermission = (key: keyof SystemPermissions, value?: any) => {
     const newValue = value !== undefined ? value : !permissions[key];
@@ -251,6 +274,13 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // New: Sync Duration
         syncDuration: permissions.syncDuration ?? 1500,
         setSyncDuration,
+        // New: Date & Time Format
+        dateFormat: settings.dateFormat || 'DD-MM-YYYY',
+        setDateFormat,
+        timeFormat: settings.timeFormat || '24h',
+        setTimeFormat,
+        dateDisplayStyle: settings.dateDisplayStyle || 'numeric',
+        setDateDisplayStyle,
         // Loading state
         isLoadingSettings
       }}

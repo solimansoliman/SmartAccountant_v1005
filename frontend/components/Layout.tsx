@@ -4,7 +4,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Users, FileText, ShoppingCart, BarChart3, Menu, X, Wallet, Database, Package, Wifi, WifiOff, RefreshCw, LogOut, User as UserIcon, PlayCircle, AlertTriangle, Sparkles, Lock, Settings, Moon, Sun, Shield, Bell, CheckCheck, Mail, Server, Loader2, Upload, Image as ImageIcon, Trash2, Building, Clock, Check, Circle, Crown, Search, Command, Keyboard } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
-import { profileApi, accountApi } from '../services/adminApi';
+import { profileApi, accountApi, AccountUsageDto } from '../services/adminApi';
 import { checkApiConnection } from '../services/apiService';
 import { useSettings } from '../context/SettingsContext';
 import { formatDateTime, formatDate } from '../services/dateService';
@@ -61,6 +61,9 @@ const Layout: React.FC = () => {
   // Global Search & Shortcuts Modal State
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+
+  // Account Usage State for Plan Card
+  const [accountUsage, setAccountUsage] = useState<AccountUsageDto | null>(null);
 
   // Helper function to check showRefreshPopup from localStorage directly
   // يجب استخدام نفس المفتاح المستخدم في storageService: app_system_config_global
@@ -213,6 +216,21 @@ const Layout: React.FC = () => {
     const interval = setInterval(checkApi, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Load Account Usage for Plan Card
+  useEffect(() => {
+    const loadAccountUsage = async () => {
+      if (user?.accountId) {
+        try {
+          const usage = await accountApi.getUsage(user.accountId);
+          setAccountUsage(usage);
+        } catch (error) {
+          console.error('Error loading account usage:', error);
+        }
+      }
+    };
+    loadAccountUsage();
+  }, [user?.accountId]);
 
   // Close notifications when clicking outside (Desktop only)
   useEffect(() => {
@@ -796,22 +814,40 @@ const Layout: React.FC = () => {
         </div>
       )}
 
-      {/* Profile Edit Modal */}
+      {/* Profile Edit Modal - Enhanced Design */}
       {showProfileModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110] p-4 backdrop-blur-sm">
-             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-                 <div className="bg-slate-800 p-4 text-white flex justify-between items-center sticky top-0">
-                     <h3 className="font-bold flex items-center gap-2"><Settings size={20}/> الملف الشخصي</h3>
-                     <button onClick={() => setShowProfileModal(false)}><X size={20}/></button>
+             <div className="bg-white dark:bg-slate-800/95 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-slate-700">
+                 {/* Header */}
+                 <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
+                   <div className="flex justify-between items-center">
+                     <div className="flex items-center gap-3">
+                       <div className="p-2.5 rounded-xl bg-blue-100 dark:bg-blue-900/30">
+                         <UserIcon size={22} className="text-blue-600 dark:text-blue-400"/>
+                       </div>
+                       <div>
+                         <h3 className="font-bold text-lg text-blue-600 dark:text-blue-400">الملف الشخصي</h3>
+                         <p className="text-slate-500 dark:text-slate-400 text-sm">تعديل بياناتك الشخصية</p>
+                       </div>
+                     </div>
+                     <button 
+                       onClick={() => setShowProfileModal(false)}
+                       className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-slate-500 hover:text-slate-700 transition-all"
+                     >
+                       <X size={22}/>
+                     </button>
+                   </div>
                  </div>
-                 <form onSubmit={handleUpdateProfile} className="p-6 space-y-4">
+
+                 <form onSubmit={handleUpdateProfile} className="p-6 space-y-5">
                      {/* قسم شعار الحساب */}
-                     <div className="flex flex-col items-center gap-3 pb-4 border-b border-slate-200 dark:border-slate-700">
-                         <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">
+                     <div className="flex flex-col items-center gap-4 pb-5 border-b border-slate-200 dark:border-slate-700">
+                         <label className="flex items-center gap-2 text-sm font-semibold text-slate-600 dark:text-slate-400">
+                             <Building size={16} className="text-purple-500" />
                              شعار الحساب
                          </label>
                          <div className="relative group">
-                             <div className="w-20 h-20 rounded-full overflow-hidden border-3 border-slate-200 dark:border-slate-600 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center shadow-lg">
+                             <div className="w-24 h-24 rounded-2xl overflow-hidden border-3 border-slate-200 dark:border-slate-600 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center shadow-lg">
                                  {profileForm.logoUrl ? (
                                      <img 
                                          src={profileForm.logoUrl} 
@@ -823,7 +859,7 @@ const Layout: React.FC = () => {
                                      />
                                  ) : (
                                      <div className="flex flex-col items-center gap-1 text-slate-400">
-                                         <Building size={28} />
+                                         <Building size={32} />
                                      </div>
                                  )}
                              </div>
@@ -837,9 +873,9 @@ const Layout: React.FC = () => {
                              />
                              <label
                                  htmlFor="profile-logo-upload"
-                                 className="absolute inset-0 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                                 className="absolute inset-0 bg-black/50 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
                              >
-                                 <Upload size={18} className="text-white" />
+                                 <Upload size={20} className="text-white" />
                              </label>
                          </div>
                          <div className="flex gap-2 items-center">
@@ -848,44 +884,102 @@ const Layout: React.FC = () => {
                                  placeholder="أو أدخل رابط URL..."
                                  value={profileForm.logoUrl?.startsWith('data:') ? '' : (profileForm.logoUrl || '')}
                                  onChange={(e) => setProfileForm({ ...profileForm, logoUrl: e.target.value })}
-                                 className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-xs w-48"
+                                 className="px-3 py-2 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-xs w-52 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
                              />
                              {profileForm.logoUrl && (
                                  <button
                                      type="button"
                                      onClick={() => setProfileForm({ ...profileForm, logoUrl: '' })}
-                                     className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"
+                                     className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-colors"
                                      title="حذف الشعار"
                                  >
-                                     <Trash2 size={14} />
+                                     <Trash2 size={16} />
                                  </button>
                              )}
                          </div>
                          <p className="text-xs text-slate-400">(PNG, JPG, SVG - حد أقصى 500KB)</p>
                      </div>
 
-                     <div>
-                         <label className="block text-sm text-slate-600 dark:text-slate-400 mb-1">الاسم الشخصي</label>
-                         <input type="text" value={profileForm.name} onChange={e => setProfileForm({...profileForm, name: e.target.value})} className="w-full border dark:border-slate-600 p-2 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"/>
-                     </div>
-                     <div>
-                         <label className="block text-sm text-slate-600 dark:text-slate-400 mb-1">اسم الشركة / المتجر</label>
-                         <input type="text" value={profileForm.companyName} onChange={e => setProfileForm({...profileForm, companyName: e.target.value})} className="w-full border dark:border-slate-600 p-2 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white" disabled={!!user?.parentId}/>
-                         {user?.parentId && <p className="text-xs text-amber-500 mt-1">لا يمكن تغيير اسم الشركة للموظفين</p>}
-                     </div>
-                     <div>
-                         <label className="block text-sm text-slate-600 dark:text-slate-400 mb-1">تحديث كلمة المرور</label>
+                     {/* الاسم الشخصي */}
+                     <div className="group">
+                         <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                           <UserIcon size={16} className="text-emerald-500" />
+                           الاسم الشخصي
+                         </label>
                          <div className="relative">
-                            <Lock size={16} className="absolute right-3 top-3 text-slate-400"/>
-                            <input type="text" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} className="w-full border dark:border-slate-600 p-2 pr-9 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white" placeholder="اتركه فارغاً إذا لم ترد تغييره"/>
+                           <input 
+                             type="text" 
+                             value={profileForm.name} 
+                             onChange={e => setProfileForm({...profileForm, name: e.target.value})} 
+                             className="w-full border-2 border-slate-200 dark:border-slate-600 p-3 pr-10 rounded-xl bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all"
+                             placeholder="أدخل اسمك..."
+                           />
+                           <UserIcon size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
                          </div>
                      </div>
-                     <div className="flex gap-3 pt-4">
-                         <button type="submit" disabled={updatingProfile} className="flex-1 bg-primary text-white py-2 rounded-lg font-bold hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-50">
-                            {updatingProfile && <Loader2 className="animate-spin" size={18}/>}
+
+                     {/* اسم الشركة */}
+                     <div className="group">
+                         <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                           <Building size={16} className="text-blue-500" />
+                           اسم الشركة / المتجر
+                         </label>
+                         <div className="relative">
+                           <input 
+                             type="text" 
+                             value={profileForm.companyName} 
+                             onChange={e => setProfileForm({...profileForm, companyName: e.target.value})} 
+                             className={`w-full border-2 border-slate-200 dark:border-slate-600 p-3 pr-10 rounded-xl bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all ${user?.parentId ? 'opacity-60 cursor-not-allowed' : ''}`}
+                             placeholder="اسم شركتك أو متجرك..."
+                             disabled={!!user?.parentId}
+                           />
+                           <Building size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                         </div>
+                         {user?.parentId && (
+                           <p className="flex items-center gap-1.5 text-xs text-amber-500 mt-2">
+                             <AlertTriangle size={12} />
+                             لا يمكن تغيير اسم الشركة للموظفين
+                           </p>
+                         )}
+                     </div>
+
+                     {/* كلمة المرور */}
+                     <div className="group">
+                         <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                           <Lock size={16} className="text-amber-500" />
+                           تحديث كلمة المرور
+                           <span className="text-slate-400 text-xs font-normal">(اختياري)</span>
+                         </label>
+                         <div className="relative">
+                            <input 
+                              type="text" 
+                              value={profileForm.password} 
+                              onChange={e => setProfileForm({...profileForm, password: e.target.value})} 
+                              className="w-full border-2 border-slate-200 dark:border-slate-600 p-3 pr-10 rounded-xl bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none transition-all" 
+                              placeholder="اتركه فارغاً إذا لم ترد تغييره"
+                            />
+                            <Lock size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                         </div>
+                     </div>
+
+                     {/* Action Buttons */}
+                     <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                         <button 
+                           type="submit" 
+                           disabled={updatingProfile} 
+                           className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-bold hover:from-blue-700 hover:to-indigo-700 flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-blue-500/25 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
+                         >
+                            {updatingProfile ? <Loader2 className="animate-spin" size={18}/> : <Check size={18}/>}
                             حفظ التغييرات
                          </button>
-                         <button type="button" onClick={() => setShowProfileModal(false)} className="flex-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 py-2 rounded-lg hover:bg-slate-200">إلغاء</button>
+                         <button 
+                           type="button" 
+                           onClick={() => setShowProfileModal(false)} 
+                           className="flex-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 py-3 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 font-semibold flex items-center justify-center gap-2 transition-all"
+                         >
+                           <X size={18}/>
+                           إلغاء
+                         </button>
                      </div>
                  </form>
              </div>
@@ -914,22 +1008,20 @@ const Layout: React.FC = () => {
 
       {/* Sidebar */}
       <aside 
-        className={`fixed md:static inset-y-0 right-0 z-30 w-64 bg-white dark:bg-gradient-to-b dark:from-slate-800 dark:to-slate-900 shadow-xl md:shadow-lg transform transition-transform duration-300 ease-in-out print:hidden border-l border-slate-200 dark:border-slate-700 ${
-          isSidebarOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'
-        }`}
+        className={`fixed md:static inset-y-0 right-0 z-30 w-[280px] md:w-64 bg-white dark:bg-gradient-to-b dark:from-slate-800 dark:to-slate-900 shadow-xl md:shadow-lg transform transition-transform duration-300 ease-in-out print:hidden border-l border-slate-200 dark:border-slate-700 ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}`}
       >
         <div className="h-full flex flex-col">
           {/* Brand & User Info & Connection Status (TOP) */}
-          <div className="p-6 border-b border-slate-200 dark:border-slate-700/50 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800 dark:to-slate-850">
-            <div className="flex items-center justify-between mb-4">
+          <div className="p-4 md:p-6 border-b border-slate-200 dark:border-slate-700/50 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800 dark:to-slate-850">
+            <div className="flex items-center justify-between mb-3 md:mb-4">
                 <div className="flex items-center gap-2 text-primary dark:text-blue-300">
-                    <div className="bg-gradient-to-br from-blue-500 to-blue-600 dark:from-blue-400 dark:to-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-500/30 dark:shadow-blue-500/20">
-                        <Wallet size={20} />
+                    <div className="bg-gradient-to-br from-blue-500 to-blue-600 dark:from-blue-400 dark:to-blue-600 p-1.5 md:p-2 rounded-lg md:rounded-xl text-white shadow-lg shadow-blue-500/30 dark:shadow-blue-500/20">
+                        <Wallet size={18} />
                     </div>
-                    <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100">المحاسب الذكي</h1>
+                    <h1 className="text-base md:text-lg font-bold text-slate-800 dark:text-slate-100">المحاسب الذكي</h1>
                 </div>
-                <button className="md:hidden text-slate-500 dark:text-slate-400" onClick={() => setSidebarOpen(false)}>
-                    <X size={24} />
+                <button className="md:hidden text-slate-500 dark:text-slate-400 p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg" onClick={() => setSidebarOpen(false)}>
+                    <X size={22} />
                 </button>
             </div>
             
@@ -937,10 +1029,10 @@ const Layout: React.FC = () => {
             {user && (
                 <div 
                     onClick={() => setShowProfileModal(true)}
-                    className={`bg-white dark:bg-slate-700 border rounded-lg p-3 flex items-center gap-3 shadow-sm mb-3 cursor-pointer hover:shadow-md transition-all group ${user.role === 'sys_admin' ? 'border-amber-400 ring-1 ring-amber-400' : 'border-slate-200 dark:border-slate-600 hover:border-blue-300'}`}
+                    className={`bg-white dark:bg-slate-700 border rounded-lg p-2 md:p-3 flex items-center gap-2 md:gap-3 shadow-sm mb-2 md:mb-3 cursor-pointer hover:shadow-md transition-all group ${user.role === 'sys_admin' ? 'border-amber-400 ring-1 ring-amber-400' : 'border-slate-200 dark:border-slate-600 hover:border-blue-300'}`}
                 >
                     {/* صورة/شعار الحساب */}
-                    <div className="relative w-10 h-10 rounded-full overflow-hidden border-2 border-slate-200 dark:border-slate-600 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-600 dark:to-slate-700 flex items-center justify-center group-hover:border-primary transition-colors">
+                    <div className="relative w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border-2 border-slate-200 dark:border-slate-600 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-600 dark:to-slate-700 flex items-center justify-center group-hover:border-primary transition-colors shrink-0">
                         {user.accountLogo ? (
                             <img 
                                 src={user.accountLogo} 
@@ -953,75 +1045,117 @@ const Layout: React.FC = () => {
                             />
                         ) : null}
                         <div className={`${user.accountLogo ? 'hidden' : ''} p-2 rounded-full transition-colors ${user.role === 'sys_admin' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 dark:bg-slate-600 text-primary dark:text-blue-300 group-hover:bg-blue-600 group-hover:text-white'}`}>
-                            {user.role === 'sys_admin' ? <Shield size={18}/> : <UserIcon size={18} />}
+                            {user.role === 'sys_admin' ? <Shield size={16}/> : <UserIcon size={16} />}
                         </div>
                     </div>
-                    <div className="overflow-hidden flex-1">
-                        <p className="text-sm font-bold text-slate-800 dark:text-white truncate">{user.companyName}</p>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate flex items-center gap-1">
+                    <div className="overflow-hidden flex-1 min-w-0">
+                        <p className="text-xs md:text-sm font-bold text-slate-800 dark:text-white truncate">{user.companyName}</p>
+                        <p className="text-[9px] md:text-[10px] text-slate-500 dark:text-slate-400 truncate flex items-center gap-1">
                             {user.name} 
                             {user.role === 'sys_admin' && <span className="text-amber-500 font-bold">(Admin)</span>}
-                            {user.parentId && <span className="text-xs bg-slate-100 dark:bg-slate-600 px-1 rounded ml-1">موظف</span>}
+                            {user.parentId && <span className="text-[9px] bg-slate-100 dark:bg-slate-600 px-1 rounded">موظف</span>}
                         </p>
                     </div>
-                    <Settings size={14} className="text-slate-300 group-hover:text-blue-500"/>
+                    <Settings size={12} className="text-slate-300 group-hover:text-blue-500 shrink-0"/>
                 </div>
             )}
 
+            {/* Plan Usage Mini Card */}
+            {accountUsage && (
+              <NavLink 
+                to="/plans"
+                onClick={() => setSidebarOpen(false)}
+                className="block bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-900/30 dark:to-purple-900/30 p-2 md:p-2.5 rounded-lg border border-violet-200 dark:border-violet-700/50 hover:shadow-md transition-all group"
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Crown size={12} className="text-violet-600 dark:text-violet-400" />
+                    <span className="text-[10px] md:text-xs font-bold text-violet-700 dark:text-violet-300">
+                      {accountUsage.planName}
+                    </span>
+                  </div>
+                  {accountUsage.daysRemaining <= 7 && accountUsage.daysRemaining > 0 && (
+                    <span className="text-[8px] bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400 px-1 py-0.5 rounded">
+                      {accountUsage.daysRemaining}d
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  <div className="text-[8px] md:text-[9px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                    <span>الفواتير</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-300">{accountUsage.currentMonthInvoices}/{accountUsage.maxInvoices === -1 ? '∞' : accountUsage.maxInvoices}</span>
+                  </div>
+                  <div className="text-[8px] md:text-[9px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                    <span>العملاء</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-300">{accountUsage.currentCustomers}/{accountUsage.maxCustomers === -1 ? '∞' : accountUsage.maxCustomers}</span>
+                  </div>
+                </div>
+                <div className="mt-1.5 h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all ${
+                      accountUsage.invoicesPercentage >= 90 ? 'bg-rose-500' : 
+                      accountUsage.invoicesPercentage >= 70 ? 'bg-amber-500' : 'bg-violet-500'
+                    }`}
+                    style={{ width: `${Math.min(accountUsage.invoicesPercentage, 100)}%` }}
+                  />
+                </div>
+              </NavLink>
+            )}
+
             {/* Icons: Internet Status & API Status & Dark Mode & Notifications (Desktop) */}
-            <div className="flex gap-2 flex-wrap">
-                <div className="flex-1 flex items-center gap-2 bg-white/50 dark:bg-slate-700/50 p-2 rounded-lg border border-slate-100 dark:border-slate-600">
-                    {isOnline ? <Wifi size={14} className="text-emerald-500"/> : <WifiOff size={14} className="text-rose-500"/>}
-                    <span className={`text-[10px] font-bold ${isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+            <div className="flex gap-1.5 md:gap-2 flex-wrap">
+                <div className="flex items-center gap-1 md:gap-2 bg-white/50 dark:bg-slate-700/50 p-1.5 md:p-2 rounded-lg border border-slate-100 dark:border-slate-600">
+                    {isOnline ? <Wifi size={12} className="text-emerald-500"/> : <WifiOff size={12} className="text-rose-500"/>}
+                    <span className={`text-[9px] md:text-[10px] font-bold ${isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                         {isOnline ? 'متصل' : 'مفصول'}
                     </span>
                 </div>
                 
                 {/* API Connection Status */}
-                <div className="flex-1 flex items-center gap-2 bg-white/50 dark:bg-slate-700/50 p-2 rounded-lg border border-slate-100 dark:border-slate-600" title={isApiConnected ? 'متصل بالخادم' : 'غير متصل بالخادم - وضع محلي'}>
-                    <Server size={14} className={isApiConnected ? 'text-emerald-500' : 'text-amber-500'}/>
-                    <span className={`text-[10px] font-bold ${isApiConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                <div className="flex items-center gap-1 md:gap-2 bg-white/50 dark:bg-slate-700/50 p-1.5 md:p-2 rounded-lg border border-slate-100 dark:border-slate-600" title={isApiConnected ? 'متصل بالخادم' : 'غير متصل بالخادم - وضع محلي'}>
+                    <Server size={12} className={isApiConnected ? 'text-emerald-500' : 'text-amber-500'}/>
+                    <span className={`text-[9px] md:text-[10px] font-bold ${isApiConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
                         {isApiConnected ? 'API' : 'محلي'}
                     </span>
                 </div>
                 
                 <button 
                   onClick={toggleDarkMode}
-                  className="p-2 rounded-lg border border-slate-100 dark:border-slate-600 bg-white/50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                  className="p-1.5 md:p-2 rounded-lg border border-slate-100 dark:border-slate-600 bg-white/50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
                   title={isDarkMode ? 'الوضع النهاري' : 'الوضع الليلي'}
                 >
-                  {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+                  {isDarkMode ? <Sun size={12} /> : <Moon size={12} />}
                 </button>
 
                 {/* Global Search Button */}
                 <button 
                   onClick={() => setShowGlobalSearch(true)}
-                  className="p-2 rounded-lg border border-slate-100 dark:border-slate-600 bg-white/50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors group"
+                  className="p-1.5 md:p-2 rounded-lg border border-slate-100 dark:border-slate-600 bg-white/50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors group"
                   title="البحث الشامل (Ctrl+K)"
                 >
-                  <Search size={14} className="group-hover:text-blue-500 transition-colors" />
+                  <Search size={12} className="group-hover:text-blue-500 transition-colors" />
                 </button>
 
-                {/* Keyboard Shortcuts Button */}
+                {/* Keyboard Shortcuts Button - Hidden on mobile */}
                 <button 
                   onClick={() => setShowShortcutsModal(true)}
-                  className="p-2 rounded-lg border border-slate-100 dark:border-slate-600 bg-white/50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors group"
+                  className="hidden md:flex p-1.5 md:p-2 rounded-lg border border-slate-100 dark:border-slate-600 bg-white/50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors group"
                   title="اختصارات لوحة المفاتيح (Ctrl+/)"
                 >
-                  <Keyboard size={14} className="group-hover:text-purple-500 transition-colors" />
+                  <Keyboard size={12} className="group-hover:text-purple-500 transition-colors" />
                 </button>
 
                  {/* Desktop Notification Icon */}
                  <div className="relative hidden md:block" ref={notifDropdownRef}>
                     <button 
                        onClick={() => setShowNotifications(!showNotifications)}
-                       className={`p-2 rounded-lg border border-slate-100 dark:border-slate-600 bg-white/50 dark:bg-slate-700/50 transition-colors ${showNotifications ? 'bg-blue-100 dark:bg-slate-600 text-primary' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}
+                       className={`p-1.5 md:p-2 rounded-lg border border-slate-100 dark:border-slate-600 bg-white/50 dark:bg-slate-700/50 transition-colors ${showNotifications ? 'bg-blue-100 dark:bg-slate-600 text-primary' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}
                        title="الإشعارات"
                     >
-                        <Bell size={14} />
+                        <Bell size={12} />
                         {unreadCount > 0 && (
-                            <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-bounce">
-                                {unreadCount > 9 ? '+9' : unreadCount}
+                            <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[8px] font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center animate-bounce">
+                                {unreadCount > 9 ? '+' : unreadCount}
                             </span>
                         )}
                     </button>
@@ -1036,35 +1170,31 @@ const Layout: React.FC = () => {
             </div>
           </div>
           
-          <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+          <nav className="flex-1 p-2 md:p-4 space-y-1 md:space-y-2 overflow-y-auto">
             {navItems.filter(item => item.visible).map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
                 onClick={() => setSidebarOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
-                    isActive 
-                      ? 'bg-gradient-to-l from-blue-500 to-blue-600 text-white font-semibold shadow-lg shadow-blue-500/30 dark:shadow-blue-500/20' 
-                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-blue-600 dark:hover:text-blue-400 hover:pr-6'
-                  }`
+                  `flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 md:py-3 rounded-lg md:rounded-xl transition-all duration-200 text-sm md:text-base ${isActive ? 'bg-gradient-to-l from-blue-500 to-blue-600 text-white font-semibold shadow-lg shadow-blue-500/30 dark:shadow-blue-500/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-blue-600 dark:hover:text-blue-400 active:bg-slate-200 dark:active:bg-slate-600'}`
                 }
               >
-                {item.icon}
+                {React.cloneElement(item.icon as React.ReactElement, { size: 18 })}
                 <span>{item.label}</span>
               </NavLink>
             ))}
           </nav>
 
           {/* Sync & Logout Buttons (Bottom) */}
-          <div className="p-4 border-t border-slate-200 dark:border-slate-700/50 bg-gradient-to-t from-slate-100 to-white dark:from-slate-900 dark:to-slate-850 space-y-3">
+          <div className="p-3 md:p-4 border-t border-slate-200 dark:border-slate-700/50 bg-gradient-to-t from-slate-100 to-white dark:from-slate-900 dark:to-slate-850 space-y-2 md:space-y-3">
             
             {/* Auto Refresh Button with Progress Bar */}
             {autoRefreshEnabled && autoRefreshInterval > 0 && isOnline && isApiConnected && (
               <button 
                 onClick={() => handleRefresh(false)}
                 disabled={isRefreshing}
-                className="relative w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-medium overflow-hidden bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800 hover:bg-cyan-100 dark:hover:bg-cyan-900/40 transition-colors cursor-pointer"
+                className="relative w-full flex items-center justify-center gap-1.5 md:gap-2 py-2 md:py-2.5 rounded-lg text-[11px] md:text-xs font-medium overflow-hidden bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800 hover:bg-cyan-100 dark:hover:bg-cyan-900/40 transition-colors cursor-pointer"
                 title="اضغط للتحديث الآن"
               >
                   {/* Progress Bar Overlay - fills up as countdown approaches 0 */}
@@ -1072,7 +1202,7 @@ const Layout: React.FC = () => {
                     className="absolute inset-y-0 right-0 bg-cyan-500/30 dark:bg-cyan-400/30 transition-all duration-1000 ease-linear"
                     style={{ width: `${((autoRefreshInterval - refreshCountdown) / autoRefreshInterval) * 100}%` }}
                   />
-                  <RefreshCw size={14} className={`relative z-10 ${isRefreshing ? 'animate-spin text-cyan-500' : ''}`} />
+                  <RefreshCw size={12} className={`relative z-10 ${isRefreshing ? 'animate-spin text-cyan-500' : ''}`} />
                   <span className="relative z-10">
                     {isRefreshing ? 'جاري التحديث...' : `تحديث تلقائي خلال ${refreshCountdown}ث`}
                   </span>
@@ -1084,7 +1214,7 @@ const Layout: React.FC = () => {
               <button 
                   onClick={handleSync}
                   disabled={!isOnline || isSyncing}
-                  className={`relative w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-medium transition-all overflow-hidden ${
+                  className={`relative w-full flex items-center justify-center gap-1.5 md:gap-2 py-2 md:py-2.5 rounded-lg text-[11px] md:text-xs font-medium transition-all overflow-hidden ${
                     isOnline 
                       ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800' 
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed'
@@ -1097,9 +1227,9 @@ const Layout: React.FC = () => {
                       style={{ width: `${syncProgress}%` }}
                     />
                   )}
-                  <Database size={14} className={`relative z-10 ${isSyncing ? 'animate-pulse text-indigo-500' : ''}`} />
+                  <Database size={12} className={`relative z-10 ${isSyncing ? 'animate-pulse text-indigo-500' : ''}`} />
                   <span className="relative z-10">
-                    {isSyncing ? `جاري المزامنة ${Math.round(syncProgress)}%` : 'مزامنة البيانات يدوياً'}
+                    {isSyncing ? `جاري المزامنة ${Math.round(syncProgress)}%` : 'مزامنة يدوية'}
                   </span>
               </button>
             )}
@@ -1107,9 +1237,9 @@ const Layout: React.FC = () => {
             <button 
                 type="button"
                 onClick={handleLogoutClick}
-                className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
+                className="w-full flex items-center justify-center gap-1.5 md:gap-2 py-2 rounded-lg text-[11px] md:text-xs font-medium bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
             >
-                <LogOut size={14} />
+                <LogOut size={12} />
                 تسجيل خروج
             </button>
           </div>

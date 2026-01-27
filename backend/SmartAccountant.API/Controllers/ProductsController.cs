@@ -189,14 +189,67 @@ namespace SmartAccountant.API.Controllers
             };
         }
 
+        // DTO لإنشاء منتج جديد
+        public class CreateProductDto
+        {
+            public string? Code { get; set; }
+            public string? Barcode { get; set; }
+            public string Name { get; set; } = string.Empty;
+            public string? NameEn { get; set; }
+            public string? Description { get; set; }
+            public string? ImageUrl { get; set; }
+            public int? UnitId { get; set; }
+            public string? Unit { get; set; }  // اسم الوحدة كنص
+            public int? CategoryId { get; set; }
+            public decimal CostPrice { get; set; }
+            public decimal SellingPrice { get; set; }
+            public decimal StockQuantity { get; set; }
+            public decimal MinStockLevel { get; set; }
+            public decimal TaxPercent { get; set; }
+            public bool IsActive { get; set; } = true;
+        }
+
         /// <summary>
         /// إنشاء منتج جديد
         /// </summary>
         [HttpPost]
-        public async Task<ActionResult<Product>> CreateProduct(Product product)
+        public async Task<ActionResult<ProductResponseDto>> CreateProduct([FromBody] CreateProductDto dto)
         {
             var accountId = GetAccountId();
-            product.AccountId = accountId;
+            
+            // تحويل اسم الوحدة إلى UnitId إذا تم إرساله
+            int? unitId = dto.UnitId;
+            if (!unitId.HasValue && !string.IsNullOrEmpty(dto.Unit))
+            {
+                // البحث عن الوحدة بالاسم ضمن الحساب الحالي
+                var unit = await _context.Units
+                    .FirstOrDefaultAsync(u => u.Name == dto.Unit && u.AccountId == accountId && u.IsActive);
+                if (unit != null)
+                {
+                    unitId = unit.Id;
+                }
+            }
+
+            var product = new Product
+            {
+                AccountId = accountId,
+                Code = dto.Code,
+                Barcode = dto.Barcode,
+                Name = dto.Name,
+                NameEn = dto.NameEn,
+                Description = dto.Description,
+                ImageUrl = dto.ImageUrl,
+                UnitId = unitId,
+                CategoryId = dto.CategoryId,
+                CostPrice = dto.CostPrice,
+                SellingPrice = dto.SellingPrice,
+                StockQuantity = dto.StockQuantity,
+                MinStockLevel = dto.MinStockLevel,
+                TaxPercent = dto.TaxPercent,
+                IsActive = dto.IsActive,
+                CreatedAt = DateTime.UtcNow,
+                CreatedByUserId = GetUserId()
+            };
             
             // توليد كود المنتج تلقائياً
             if (string.IsNullOrEmpty(product.Code))
@@ -210,15 +263,42 @@ namespace SmartAccountant.API.Controllers
                 product.Code = $"P{nextNumber:D4}";
             }
 
-            product.CreatedAt = DateTime.UtcNow;
             _context.Products.Add(product);
             await _context.SaveChangesAsync();
+
+            // جلب اسم الوحدة
+            string? unitName = null;
+            if (product.UnitId.HasValue)
+            {
+                var unitEntity = await _context.Units.FindAsync(product.UnitId.Value);
+                unitName = unitEntity?.Name;
+            }
 
             // تسجيل النشاط
             await _activityLog.LogAsync(accountId, GetUserId() ?? 1, ActivityActions.CreateProduct, EntityTypes.Product,
                 product.Id, product.Name, $"تم إنشاء منتج جديد: {product.Name} (الكود: {product.Code})");
 
-            return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
+            return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, new ProductResponseDto
+            {
+                Id = product.Id,
+                AccountId = product.AccountId,
+                Code = product.Code,
+                Barcode = product.Barcode,
+                Name = product.Name,
+                NameEn = product.NameEn,
+                Description = product.Description,
+                ImageUrl = product.ImageUrl,
+                UnitId = product.UnitId,
+                Unit = unitName,
+                CategoryId = product.CategoryId,
+                CostPrice = product.CostPrice,
+                SellingPrice = product.SellingPrice,
+                StockQuantity = product.StockQuantity,
+                MinStockLevel = product.MinStockLevel,
+                TaxPercent = product.TaxPercent,
+                IsActive = product.IsActive,
+                CreatedAt = product.CreatedAt
+            });
         }
 
         // DTO لتحديث منتج

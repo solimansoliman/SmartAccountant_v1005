@@ -56,10 +56,10 @@ namespace SmartAccountant.API.Controllers
                 query = query.Where(a => a.EntityType == entityType);
 
             if (fromDate.HasValue)
-                query = query.Where(a => a.CreatedAt >= fromDate);
+                query = query.Where(a => a.CreatedAt >= fromDate.Value.Date);
 
             if (toDate.HasValue)
-                query = query.Where(a => a.CreatedAt <= toDate);
+                query = query.Where(a => a.CreatedAt < toDate.Value.Date.AddDays(1));
 
             var totalCount = await query.CountAsync();
             var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);

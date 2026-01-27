@@ -17,6 +17,19 @@ namespace SmartAccountant.API.Controllers
         }
 
         /// <summary>
+        /// الحصول على AccountId من الـ Header
+        /// </summary>
+        private int GetAccountId()
+        {
+            if (Request.Headers.TryGetValue("X-Account-Id", out var accountIdHeader) && 
+                int.TryParse(accountIdHeader, out var accountId))
+            {
+                return accountId;
+            }
+            return 1; // Default account
+        }
+
+        /// <summary>
         /// الحصول على جميع الإيرادات
         /// </summary>
         [HttpGet]
@@ -25,8 +38,10 @@ namespace SmartAccountant.API.Controllers
             [FromQuery] DateTime? fromDate,
             [FromQuery] DateTime? toDate)
         {
+            var accountId = GetAccountId();
             var query = _context.Revenues
                 .Include(r => r.Category)
+                .Where(r => r.AccountId == accountId && r.DeletedAt == null)
                 .AsQueryable();
 
             if (categoryId.HasValue)
@@ -47,9 +62,10 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<Revenue>> GetRevenue(int id)
         {
+            var accountId = GetAccountId();
             var revenue = await _context.Revenues
                 .Include(r => r.Category)
-                .FirstOrDefaultAsync(r => r.Id == id);
+                .FirstOrDefaultAsync(r => r.Id == id && r.AccountId == accountId && r.DeletedAt == null);
 
             if (revenue == null)
             {
@@ -65,13 +81,17 @@ namespace SmartAccountant.API.Controllers
         [HttpPost]
         public async Task<ActionResult<Revenue>> CreateRevenue(Revenue revenue)
         {
+            var accountId = GetAccountId();
+            
             // توليد رقم الإيراد
             var lastRevenue = await _context.Revenues
+                .Where(r => r.AccountId == accountId)
                 .OrderByDescending(r => r.Id)
                 .FirstOrDefaultAsync();
 
             var nextNumber = (lastRevenue?.Id ?? 0) + 1;
             revenue.RevenueNumber = $"REV-{DateTime.UtcNow:yyyyMM}-{nextNumber:D6}";
+            revenue.AccountId = accountId;
             revenue.NetAmount = revenue.Amount + revenue.TaxAmount;
             revenue.CreatedAt = DateTime.UtcNow;
 
@@ -87,14 +107,26 @@ namespace SmartAccountant.API.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateRevenue(int id, Revenue revenue)
         {
+            var accountId = GetAccountId();
+            
             if (id != revenue.Id)
             {
                 return BadRequest();
             }
 
+            // التحقق من أن الإيراد يخص هذا الحساب
+            var existingRevenue = await _context.Revenues
+                .FirstOrDefaultAsync(r => r.Id == id && r.AccountId == accountId);
+            
+            if (existingRevenue == null)
+            {
+                return NotFound();
+            }
+
+            revenue.AccountId = accountId;
             revenue.NetAmount = revenue.Amount + revenue.TaxAmount;
             revenue.UpdatedAt = DateTime.UtcNow;
-            _context.Entry(revenue).State = EntityState.Modified;
+            _context.Entry(existingRevenue).CurrentValues.SetValues(revenue);
 
             try
             {
@@ -102,7 +134,7 @@ namespace SmartAccountant.API.Controllers
             }
             catch (DbUpdateConcurrencyException)
             {
-                if (!_context.Revenues.Any(r => r.Id == id))
+                if (!_context.Revenues.Any(r => r.Id == id && r.AccountId == accountId))
                 {
                     return NotFound();
                 }
@@ -118,7 +150,10 @@ namespace SmartAccountant.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteRevenue(int id)
         {
-            var revenue = await _context.Revenues.FindAsync(id);
+            var accountId = GetAccountId();
+            var revenue = await _context.Revenues
+                .FirstOrDefaultAsync(r => r.Id == id && r.AccountId == accountId);
+            
             if (revenue == null)
             {
                 return NotFound();
@@ -137,8 +172,9 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("categories")]
         public async Task<ActionResult<IEnumerable<RevenueCategory>>> GetCategories()
         {
+            var accountId = GetAccountId();
             return await _context.RevenueCategories
-                .Where(c => c.IsActive)
+                .Where(c => c.AccountId == accountId && c.IsActive)
                 .OrderBy(c => c.Name)
                 .ToListAsync();
         }
@@ -149,6 +185,9 @@ namespace SmartAccountant.API.Controllers
         [HttpPost("categories")]
         public async Task<ActionResult<RevenueCategory>> CreateCategory(RevenueCategory category)
         {
+            var accountId = GetAccountId();
+            category.AccountId = accountId;
+            
             _context.RevenueCategories.Add(category);
             await _context.SaveChangesAsync();
 
@@ -163,9 +202,11 @@ namespace SmartAccountant.API.Controllers
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate)
         {
+            var accountId = GetAccountId();
             var revenues = await _context.Revenues
                 .Include(r => r.Category)
-                .Where(r => r.RevenueDate >= fromDate
+                .Where(r => r.AccountId == accountId
+                    && r.RevenueDate >= fromDate
                     && r.RevenueDate <= toDate
                     && r.DeletedAt == null)
                 .ToListAsync();

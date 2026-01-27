@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useCustomers, useProducts, useInvoices, useExpenses, useRevenues } from '../services/dataHooks';
 import { TransactionType } from '../types';
-import { Printer, Filter, FileBarChart, TrendingUp, TrendingDown, DollarSign, Calendar, Search, PieChart, ArrowDownLeft, ArrowUpRight, Download, Loader2, FileSpreadsheet, FileText, BarChart3 } from 'lucide-react';
+import { Printer, Filter, FileBarChart, TrendingUp, TrendingDown, DollarSign, Calendar, Search, PieChart, ArrowDownLeft, ArrowUpRight, Download, Loader2, FileSpreadsheet, FileText, BarChart3, User, Package, X } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
@@ -491,17 +491,17 @@ const Reports: React.FC = () => {
   return (
     <div className="space-y-6">
        {/* --- HEADER (PRINT ONLY) --- */}
-       <div className="hidden print:block pb-6 border-b-2 border-slate-800 mb-6">
-           <div className="flex justify-between items-start">
+       <div className="hidden print:block pb-4 border-b-2 border-slate-800 mb-4">
+           <div className="flex justify-between items-center">
                <div>
-                   <h1 className="text-3xl font-extrabold text-slate-900 mb-1">{user?.companyName || 'المحاسب الذكي'}</h1>
-                   <p className="text-slate-600 font-bold">تقرير الأداء المالي الشامل</p>
+                   <h1 className="text-2xl font-extrabold text-slate-900 mb-0.5">{user?.companyName || 'المحاسب الذكي'}</h1>
+                   <p className="text-slate-600 font-bold text-sm">تقرير الأداء المالي الشامل</p>
                </div>
-               <div className="text-left text-sm text-slate-600">
+               <div className="text-left text-xs text-slate-600">
                    <p><span className="font-bold">تاريخ التقرير:</span> {formatDateTime(new Date())}</p>
                    <p><span className="font-bold">الفترة:</span> من {startDate} إلى {endDate}</p>
-                   {selectedCustomerId && <p className="bg-slate-100 px-2 rounded mt-1">تصفية حسب العميل: {customers.find(c => String(c.id) === selectedCustomerId)?.name}</p>}
-                   {selectedProductId && <p className="bg-slate-100 px-2 rounded mt-1">تصفية حسب المنتج: {products.find(p => String(p.id) === selectedProductId)?.name}</p>}
+                   {selectedCustomerId && <p className="bg-slate-100 px-2 rounded mt-0.5 text-xs">تصفية: {customers.find(c => String(c.id) === selectedCustomerId)?.name}</p>}
+                   {selectedProductId && <p className="bg-slate-100 px-2 rounded mt-0.5 text-xs">تصفية: {products.find(p => String(p.id) === selectedProductId)?.name}</p>}
                </div>
            </div>
        </div>
@@ -556,7 +556,11 @@ const Reports: React.FC = () => {
              
              {/* Customer Filter with Search */}
              <div className="relative customer-dropdown-container">
-                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">👤 عميل محدد (اختياري)</label>
+                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5">
+                   <User size={14} className="text-blue-500" />
+                   عميل محدد
+                   <span className="text-slate-400 font-normal">(اختياري)</span>
+                 </label>
                  <div className="relative">
                    <input
                      type="text"
@@ -599,7 +603,11 @@ const Reports: React.FC = () => {
 
              {/* Product Filter with Search */}
              <div className="relative product-dropdown-container">
-                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">📦 منتج محدد (اختياري)</label>
+                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5">
+                   <Package size={14} className="text-emerald-500" />
+                   منتج محدد
+                   <span className="text-slate-400 font-normal">(اختياري)</span>
+                 </label>
                  <div className="relative">
                    <input
                      type="text"
@@ -643,37 +651,32 @@ const Reports: React.FC = () => {
 
           {/* Active Filters Display */}
           {(selectedCustomerId || selectedProductId) && (
-            <div className="flex flex-wrap gap-2 mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                <span className="text-xs font-bold text-blue-700 dark:text-blue-400">🔍 التصفية النشطة:</span>
+            <div className="flex flex-wrap items-center gap-2 mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                <span className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-400">
+                  <Filter size={14} /> التصفية النشطة:
+                </span>
                 {selectedCustomerId && (
-                    <span className="bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 px-2 py-0.5 rounded-full text-xs flex items-center gap-1">
-                        👤 {customers.find(c => String(c.id) === selectedCustomerId)?.name}
-                        <button onClick={() => setSelectedCustomerId('')} className="hover:text-red-500 font-bold">×</button>
+                    <span className="bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 px-2.5 py-1 rounded-full text-xs flex items-center gap-1.5">
+                        <User size={12} /> {customers.find(c => String(c.id) === selectedCustomerId)?.name}
+                        <button onClick={() => setSelectedCustomerId('')} className="hover:text-red-500 p-0.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-full transition-colors"><X size={12}/></button>
                     </span>
                 )}
                 {selectedProductId && (
-                    <span className="bg-emerald-100 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200 px-2 py-0.5 rounded-full text-xs flex items-center gap-1">
-                        📦 {products.find(p => String(p.id) === selectedProductId)?.name}
-                        <button onClick={() => setSelectedProductId('')} className="hover:text-red-500 font-bold">×</button>
+                    <span className="bg-emerald-100 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200 px-2.5 py-1 rounded-full text-xs flex items-center gap-1.5">
+                        <Package size={12} /> {products.find(p => String(p.id) === selectedProductId)?.name}
+                        <button onClick={() => setSelectedProductId('')} className="hover:text-red-500 p-0.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-full transition-colors"><X size={12}/></button>
                     </span>
                 )}
                 <button 
                     onClick={() => { setSelectedCustomerId(''); setSelectedProductId(''); }}
-                    className="text-xs text-red-600 dark:text-red-400 hover:underline font-bold"
+                    className="text-xs text-red-600 dark:text-red-400 hover:underline font-bold flex items-center gap-1"
                 >
-                    مسح الكل
+                    <X size={12}/> مسح كل الفلاتر
                 </button>
             </div>
           )}
 
           <div className="grid grid-cols-2 sm:flex sm:flex-row gap-2 pt-4 border-t border-slate-50 dark:border-slate-700 mt-4">
-                <button 
-                  onClick={handleGenerateReport} 
-                  className="col-span-2 sm:flex-1 bg-primary text-white px-3 py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 font-bold shadow-lg shadow-blue-200 dark:shadow-none transition-colors text-sm"
-                >
-                    <Search size={16}/> تحديث التقرير
-                </button>
-                
                 {reportData && (
                     <>
                     <button 
@@ -703,80 +706,79 @@ const Reports: React.FC = () => {
 
        {/* --- REPORT CONTENT --- */}
        {showReport && reportData ? (
-           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 print:space-y-3 print:flex print:flex-col">
                
-               {/* Summary Cards */}
-               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 print:grid-cols-4 print:gap-2">
-                   <div className="bg-white dark:bg-slate-800 p-4 md:p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:p-4 print:shadow-none">
-                       <p className="text-slate-500 dark:text-slate-400 text-xs md:text-sm mb-1 font-bold">إيراد المبيعات</p>
-                       <p className="text-lg md:text-2xl font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-2 print:text-black">
-                           <TrendingUp size={20} className="print:hidden shrink-0"/> {reportData.totalRevenue.toLocaleString()}
+               {/* Summary Cards - سطر واحد أفقي */}
+               <div className="flex flex-wrap md:flex-nowrap gap-3 md:gap-4 print:gap-1.5 print:order-1">
+                   <div className="flex-1 min-w-[120px] bg-white dark:bg-slate-800 p-3 md:p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:p-2 print:shadow-none print:rounded-md">
+                       <p className="text-slate-500 dark:text-slate-400 text-xs mb-0.5 font-bold print:text-[9px]">إيراد المبيعات</p>
+                       <p className="text-base md:text-xl font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 print:text-black print:text-sm">
+                           <TrendingUp size={16} className="print:hidden shrink-0"/> {reportData.totalRevenue.toLocaleString()}
                        </p>
-                       {selectedProductId && <span className="text-[10px] text-slate-400">خاص بالمنتج المحدد</span>}
+                       {selectedProductId && <span className="text-[9px] text-slate-400">خاص بالمنتج</span>}
                    </div>
                    
                    {!selectedProductId && !selectedCustomerId && (
                     <>
-                       <div className="bg-white dark:bg-slate-800 p-4 md:p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:p-4 print:shadow-none">
-                           <p className="text-slate-500 dark:text-slate-400 text-xs md:text-sm mb-1 font-bold">إيرادات أخرى</p>
-                           <p className="text-lg md:text-2xl font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 print:text-black">
-                               <ArrowUpRight size={20} className="print:hidden shrink-0"/> {reportData.totalOtherIncome.toLocaleString()}
+                       <div className="flex-1 min-w-[120px] bg-white dark:bg-slate-800 p-3 md:p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:p-2 print:shadow-none print:rounded-md">
+                           <p className="text-slate-500 dark:text-slate-400 text-xs mb-0.5 font-bold print:text-[9px]">إيرادات أخرى</p>
+                           <p className="text-base md:text-xl font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1 print:text-black print:text-sm">
+                               <ArrowUpRight size={16} className="print:hidden shrink-0"/> {reportData.totalOtherIncome.toLocaleString()}
                            </p>
                        </div>
-                       <div className="bg-white dark:bg-slate-800 p-4 md:p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:p-4 print:shadow-none">
-                           <p className="text-slate-500 dark:text-slate-400 text-xs md:text-sm mb-1 font-bold">المصروفات</p>
-                           <p className="text-lg md:text-2xl font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2 print:text-black">
-                               <ArrowDownLeft size={20} className="print:hidden shrink-0"/> {reportData.totalExpenses.toLocaleString()}
+                       <div className="flex-1 min-w-[120px] bg-white dark:bg-slate-800 p-3 md:p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:p-2 print:shadow-none print:rounded-md">
+                           <p className="text-slate-500 dark:text-slate-400 text-xs mb-0.5 font-bold print:text-[9px]">المصروفات</p>
+                           <p className="text-base md:text-xl font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1 print:text-black print:text-sm">
+                               <ArrowDownLeft size={16} className="print:hidden shrink-0"/> {reportData.totalExpenses.toLocaleString()}
                            </p>
                        </div>
                     </>
                    )}
 
-                   <div className={`p-4 md:p-6 rounded-xl shadow-sm border print:p-4 print:shadow-none print:border-black ${reportData.netProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-900' : 'bg-rose-50 dark:bg-rose-900/20 border-rose-100 dark:border-rose-900'} col-span-2 md:col-span-1`}>
-                       <div className="flex justify-between items-start">
+                   <div className={`flex-1 min-w-[140px] p-3 md:p-4 rounded-xl shadow-sm border print:p-2 print:shadow-none print:border-black print:rounded-md ${reportData.netProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-900' : 'bg-rose-50 dark:bg-rose-900/20 border-rose-100 dark:border-rose-900'}`}>
+                       <div className="flex justify-between items-center">
                            <div>
-                               <p className={`text-xs md:text-sm mb-1 font-bold ${reportData.netProfit >= 0 ? 'text-emerald-800 dark:text-emerald-300' : 'text-rose-800 dark:text-rose-300'} print:text-black`}>
+                               <p className={`text-xs mb-0.5 font-bold print:text-[9px] ${reportData.netProfit >= 0 ? 'text-emerald-800 dark:text-emerald-300' : 'text-rose-800 dark:text-rose-300'} print:text-black`}>
                                    {selectedProductId ? 'صافي المبيعات' : 'صافي الربح'}
                                </p>
-                               <p className={`text-lg md:text-2xl font-bold flex items-center gap-2 ${reportData.netProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'} print:text-black`}>
-                                   <DollarSign size={20} className="print:hidden shrink-0"/> {reportData.netProfit.toLocaleString()} <span className="text-[10px] md:text-xs opacity-70">{currency}</span>
+                               <p className={`text-base md:text-xl font-bold flex items-center gap-1 print:text-sm ${reportData.netProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'} print:text-black`}>
+                                   <DollarSign size={16} className="print:hidden shrink-0"/> {reportData.netProfit.toLocaleString()} <span className="text-[9px] opacity-70">{currency}</span>
                                </p>
                            </div>
                            {!selectedProductId && !selectedCustomerId && (
                                <div className="text-center print:hidden">
-                                   <PieChart size={20} className={reportData.netProfit >= 0 ? 'text-emerald-500' : 'text-rose-500'}/>
-                                   <span className="text-xs font-bold block mt-1">{reportData.profitMargin}%</span>
-                                   <span className="text-[10px] text-slate-400">هامش ربح</span>
+                                   <PieChart size={18} className={reportData.netProfit >= 0 ? 'text-emerald-500' : 'text-rose-500'}/>
+                                   <span className="text-[10px] font-bold block">{reportData.profitMargin}%</span>
                                </div>
                            )}
                        </div>
                    </div>
                </div>
 
-               {/* Charts Visualization */}
-               <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:break-inside-avoid">
-                   <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800 dark:text-white print:text-black">
+               {/* Charts Visualization - يظهر في النهاية عند الطباعة */}
+               <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:break-inside-avoid print:order-3 print:mt-4 print:p-4">
+                   <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800 dark:text-white print:text-black print:text-sm print:mb-2">
                        <FileBarChart size={20} className="text-slate-500 dark:text-slate-400 print:hidden"/>
                        المسار الزمني (أيام العمليات)
                    </h3>
                    
                    {/* Legend */}
-                   <div className="flex justify-center gap-6 mb-4 text-xs dark:text-slate-400 print:text-black">
-                       <div className="flex items-center gap-2"><div className="w-8 h-1 bg-emerald-500 rounded print:bg-black print:h-0.5"></div> الخط الأخضر: الدخل / المبيعات</div>
-                       <div className="flex items-center gap-2"><div className="w-8 h-1 bg-rose-500 rounded print:bg-gray-400 print:h-0.5 print:border-t print:border-dashed"></div> الخط الأحمر: المصروفات</div>
+                   <div className="flex justify-center gap-6 mb-4 text-xs dark:text-slate-400 print:text-black print:gap-4 print:mb-2 print:text-[10px]">
+                       <div className="flex items-center gap-2 print:gap-1"><div className="w-8 h-1 bg-emerald-500 rounded print:bg-black print:h-0.5 print:w-6"></div> الخط الأخضر: الدخل</div>
+                       <div className="flex items-center gap-2 print:gap-1"><div className="w-8 h-1 bg-rose-500 rounded print:bg-gray-400 print:h-0.5 print:border-t print:border-dashed print:w-6"></div> الخط الأحمر: المصروفات</div>
                    </div>
 
                    {/* Line Chart */}
-                   <div className="h-64 border-l border-b border-slate-200 dark:border-slate-700 pl-4 pb-4 print:border-black">
+                   <div className="h-64 border-l border-b border-slate-200 dark:border-slate-700 pl-4 pb-4 print:border-black print:h-40 print:pl-2 print:pb-2">
                        {renderLineChart(reportData.chartData)}
                    </div>
                </div>
 
-               {/* Transaction Ledger Table (Debit/Credit Style) */}
-               <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden print:border-2 print:border-black">
-                   <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700 print:bg-gray-200 print:text-black print:border-black">
+               {/* Transaction Ledger Table (Debit/Credit Style) - يظهر أولاً عند الطباعة */}
+               <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden print:border print:border-black print:order-2">
+                   <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700 print:bg-gray-100 print:text-black print:border-black print:p-2">
                        <div className="flex flex-wrap items-center justify-between gap-3">
-                           <h3 className="font-bold text-slate-700 dark:text-slate-300 print:text-black">دفتر اليومية (تفاصيل العمليات)</h3>
+                           <h3 className="font-bold text-slate-700 dark:text-slate-300 print:text-black print:text-sm">دفتر اليومية (تفاصيل العمليات)</h3>
                            
                            {/* Controls - hidden in print */}
                            <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -828,8 +830,8 @@ const Reports: React.FC = () => {
                        </div>
                        
                        {/* Results count */}
-                       <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                           <span className="bg-white dark:bg-slate-700 px-2 py-1 rounded border dark:border-slate-600 print:border-black">
+                       <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 print:mt-1 print:text-[10px]">
+                           <span className="bg-white dark:bg-slate-700 px-2 py-1 rounded border dark:border-slate-600 print:border-black print:px-1 print:py-0.5">
                                {(() => {
                                    const filtered = reportData.ledgerItems.filter(item => {
                                        const matchesSearch = !ledgerSearch || 
@@ -856,19 +858,19 @@ const Reports: React.FC = () => {
                    </div>
                    
                    <div className="overflow-x-auto">
-                       <table className="w-full text-right text-sm">
-                           <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 print:bg-gray-100 print:text-black font-bold">
+                       <table className="w-full text-right text-sm print:text-[9px]">
+                           <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 print:bg-gray-200 print:text-black font-bold">
                                <tr>
-                                   <th className="p-3 border-b dark:border-slate-700 print:border-black">التاريخ</th>
-                                   <th className="p-3 border-b dark:border-slate-700 print:border-black">نوع الحركة</th>
-                                   <th className="p-3 border-b dark:border-slate-700 print:border-black">البيان / المرجع</th>
-                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-blue-700 print:text-black">الإجمالي</th>
-                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-emerald-700 print:text-black">دائن (مدفوع)</th>
-                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-amber-600 print:text-black">المتبقي</th>
-                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-rose-700 print:text-black">مدين (مصروف)</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black print:p-1.5 print:text-[9px]">التاريخ</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black print:p-1.5 print:text-[9px]">النوع</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black print:p-1.5 print:text-[9px]">البيان</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-blue-700 print:text-black print:p-1.5 print:text-[9px]">الإجمالي</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-emerald-700 print:text-black print:p-1.5 print:text-[9px]">دائن</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-amber-600 print:text-black print:p-1.5 print:text-[9px]">المتبقي</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-rose-700 print:text-black print:p-1.5 print:text-[9px]">مدين</th>
                                </tr>
                            </thead>
-                           <tbody className="divide-y divide-slate-100 dark:divide-slate-700 print:divide-black text-slate-800 dark:text-slate-200">
+                           <tbody className="divide-y divide-slate-100 dark:divide-slate-700 print:divide-gray-300 text-slate-800 dark:text-slate-200">
                                {reportData.ledgerItems
                                    .filter(item => {
                                        const matchesSearch = !ledgerSearch || 
@@ -882,24 +884,24 @@ const Reports: React.FC = () => {
                                    })
                                    .map((item, idx) => (
                                    <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-700 print:text-black">
-                                       <td className="p-3 print:border-l print:border-black">{item.date}</td>
-                                       <td className="p-3 print:border-l print:border-black text-xs font-bold">{item.type}</td>
-                                       <td className="p-3 print:border-l print:border-black">
+                                       <td className="p-3 print:border-l print:border-gray-300 print:p-1 print:text-[8px]">{item.date}</td>
+                                       <td className="p-3 print:border-l print:border-gray-300 text-xs font-bold print:p-1 print:text-[8px]">{item.type}</td>
+                                       <td className="p-3 print:border-l print:border-gray-300 print:p-1 print:text-[8px]">
                                            <div className="flex flex-col">
                                                <span>{item.desc}</span>
-                                               {item.ref !== '-' && <span className="text-[10px] text-slate-400 print:text-gray-600">{item.ref}</span>}
+                                               {item.ref !== '-' && <span className="text-[10px] text-slate-400 print:text-gray-500 print:text-[7px]">{item.ref}</span>}
                                            </div>
                                        </td>
-                                       <td className="p-3 text-left font-mono print:border-l print:border-black text-blue-600 dark:text-blue-400">
+                                       <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-blue-600 dark:text-blue-400 print:text-black print:p-1 print:text-[8px]">
                                            {item.totalAmount > 0 ? item.totalAmount.toLocaleString() : '-'}
                                        </td>
-                                       <td className="p-3 text-left font-mono print:border-l print:border-black text-emerald-600 dark:text-emerald-400">
+                                       <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-emerald-600 dark:text-emerald-400 print:text-black print:p-1 print:text-[8px]">
                                            {item.credit > 0 ? item.credit.toLocaleString() : '-'}
                                        </td>
-                                       <td className="p-3 text-left font-mono print:border-l print:border-black text-amber-600 dark:text-amber-400 font-bold">
+                                       <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-amber-600 dark:text-amber-400 font-bold print:text-black print:p-1 print:text-[8px]">
                                            {item.remaining > 0 ? item.remaining.toLocaleString() : '-'}
                                        </td>
-                                       <td className="p-3 text-left font-mono print:border-l print:border-black text-rose-600 dark:text-rose-400">
+                                       <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-rose-600 dark:text-rose-400 print:text-black print:p-1 print:text-[8px]">
                                            {item.debit > 0 ? item.debit.toLocaleString() : '-'}
                                        </td>
                                    </tr>
@@ -917,12 +919,12 @@ const Reports: React.FC = () => {
                                        return matchesSearch && matchesType;
                                    });
                                    return (
-                                       <tr className="bg-slate-100 dark:bg-slate-900 font-bold border-t-2 border-slate-300 dark:border-slate-600 print:border-black">
-                                           <td colSpan={3} className="p-3 text-center">الإجماليات</td>
-                                           <td className="p-3 text-left text-blue-700 dark:text-blue-400">{filteredItems.reduce((sum, item) => sum + item.totalAmount, 0).toLocaleString()}</td>
-                                           <td className="p-3 text-left text-emerald-700 dark:text-emerald-400">{filteredItems.reduce((sum, item) => sum + item.credit, 0).toLocaleString()}</td>
-                                           <td className="p-3 text-left text-amber-600 dark:text-amber-400 font-bold">{filteredItems.reduce((sum, item) => sum + item.remaining, 0).toLocaleString()}</td>
-                                           <td className="p-3 text-left text-rose-700 dark:text-rose-400">{filteredItems.reduce((sum, item) => sum + item.debit, 0).toLocaleString()}</td>
+                                       <tr className="bg-slate-100 dark:bg-slate-900 font-bold border-t-2 border-slate-300 dark:border-slate-600 print:border-black print:bg-gray-200">
+                                           <td colSpan={3} className="p-3 text-center print:p-1.5 print:text-[9px]">الإجماليات</td>
+                                           <td className="p-3 text-left text-blue-700 dark:text-blue-400 print:text-black print:p-1.5 print:text-[9px]">{filteredItems.reduce((sum, item) => sum + item.totalAmount, 0).toLocaleString()}</td>
+                                           <td className="p-3 text-left text-emerald-700 dark:text-emerald-400 print:text-black print:p-1.5 print:text-[9px]">{filteredItems.reduce((sum, item) => sum + item.credit, 0).toLocaleString()}</td>
+                                           <td className="p-3 text-left text-amber-600 dark:text-amber-400 font-bold print:text-black print:p-1.5 print:text-[9px]">{filteredItems.reduce((sum, item) => sum + item.remaining, 0).toLocaleString()}</td>
+                                           <td className="p-3 text-left text-rose-700 dark:text-rose-400 print:text-black print:p-1.5 print:text-[9px]">{filteredItems.reduce((sum, item) => sum + item.debit, 0).toLocaleString()}</td>
                                        </tr>
                                    );
                                })()}
@@ -934,7 +936,7 @@ const Reports: React.FC = () => {
        ) : (
            <div className="flex flex-col items-center justify-center py-20 text-slate-400 opacity-60">
                <PieChart size={64} className="mb-4 text-slate-300 dark:text-slate-600"/>
-               <p>قم بتحديد الفترة والضغط على "تحديث التقرير" لعرض النتائج</p>
+               <p>قم بتحديد الفترة لعرض التقرير تلقائياً</p>
            </div>
        )}
     </div>
