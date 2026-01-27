@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "e/0enMHOU44=",
+  "dgSpecHash": "26v/U9uiXqM=",
   "success": true,
-  "projectFilePath": "C:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj",
+  "projectFilePath": "c:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Mohamed Mohamed\\.nuget\\packages\\azure.core\\1.47.1\\azure.core.1.47.1.nupkg.sha512",
     "C:\\Users\\Mohamed Mohamed\\.nuget\\packages\\azure.identity\\1.14.2\\azure.identity.1.14.2.nupkg.sha512",
