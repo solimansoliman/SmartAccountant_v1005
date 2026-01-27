@@ -12,11 +12,13 @@ namespace SmartAccountant.API.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IActivityLogService _activityLog;
+        private readonly IJwtService _jwtService;  // ✅ JWT Service
 
-        public AuthController(ApplicationDbContext context, IActivityLogService activityLog)
+        public AuthController(ApplicationDbContext context, IActivityLogService activityLog, IJwtService jwtService)
         {
             _context = context;
             _activityLog = activityLog;
+            _jwtService = jwtService;  // ✅ إضافة JWT Service
         }
 
         // POST: api/Auth/login
@@ -137,8 +139,8 @@ namespace SmartAccountant.API.Controllers
                         CanManageLogo = user.IsSuperAdmin || user.RoleType == UserRoleType.Owner || user.RoleType == UserRoleType.Admin || permissions.Contains("account.logo")
                     }
                 },
-                // في الإنتاج يجب إنشاء JWT Token هنا
-                Token = $"temp-token-{user.Id}-{DateTime.UtcNow.Ticks}"
+                // ✅ JWT Token آمن ومشفر
+                Token = _jwtService.GenerateToken(user)
             };
         }
 

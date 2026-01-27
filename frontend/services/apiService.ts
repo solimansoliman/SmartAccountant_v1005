@@ -305,16 +305,48 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return {} as T;
 }
 
+// ✅ تحقق من انتهاء صلاحية Token
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const exp = payload.exp * 1000; // تحويل من ثواني لميلي ثانية
+    return Date.now() >= exp;
+  } catch {
+    return true; // إذا كان Token غير صالح، اعتبره منتهي
+  }
+}
+
+// ✅ تسجيل الخروج التلقائي عند انتهاء Token
+function handleTokenExpiry(): void {
+  console.log('🔴 Token expired - logging out');
+  sessionStorage.removeItem('smart_accountant_session');
+  sessionStorage.removeItem('smart_accountant_user');
+  localStorage.removeItem('smart_accountant_session');
+  localStorage.removeItem('smart_accountant_user');
+  
+  // إعادة التوجيه لصفحة تسجيل الدخول
+  if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+    window.location.href = '/login?expired=true';
+  }
+}
+
 function getHeaders(): HeadersInit {
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
   };
   
-  // Get account info from localStorage - check both possible keys
-  const token = localStorage.getItem('smart_accountant_session');
-  const userStr = localStorage.getItem('smart_accountant_user');
+  // ✅ استخدام sessionStorage أولاً (أكثر أماناً) ثم localStorage
+  const token = sessionStorage.getItem('smart_accountant_session') 
+             || localStorage.getItem('smart_accountant_session');
+  const userStr = sessionStorage.getItem('smart_accountant_user')
+               || localStorage.getItem('smart_accountant_user');
   
   if (token) {
+    // ✅ التحقق من صلاحية Token قبل إرساله
+    if (isTokenExpired(token)) {
+      handleTokenExpiry();
+      return headers;
+    }
     headers['Authorization'] = `Bearer ${token}`;
   }
   

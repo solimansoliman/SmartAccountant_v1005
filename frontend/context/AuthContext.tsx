@@ -89,18 +89,51 @@ const mapApiUserToAuthUser = (apiUser: AuthUserDto, token?: string): AuthUser =>
   accountLogo: apiUser.accountLogo,
 });
 
-// Save session to localStorage
+// ✅ Save session to sessionStorage (أكثر أماناً) مع نسخة احتياطية في localStorage
 const saveSession = (user: AuthUser, token: string) => {
+  // حفظ في sessionStorage (أكثر أماناً - يُحذف عند إغلاق المتصفح)
+  sessionStorage.setItem(SESSION_KEY, token);
+  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+  // نسخة احتياطية في localStorage للـ "تذكرني"
   localStorage.setItem(SESSION_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 };
 
-// Get session from localStorage
+// ✅ Get session from storage (sessionStorage أولاً ثم localStorage)
 const getStoredSession = (): { user: AuthUser; token: string } | null => {
   try {
-    const token = localStorage.getItem(SESSION_KEY);
-    const userStr = localStorage.getItem(USER_KEY);
+    // جلب من sessionStorage أولاً (أكثر أماناً)
+    let token = sessionStorage.getItem(SESSION_KEY);
+    let userStr = sessionStorage.getItem(USER_KEY);
+    
+    // إذا لم يوجد في sessionStorage، جرب localStorage
+    if (!token || !userStr) {
+      token = localStorage.getItem(SESSION_KEY);
+      userStr = localStorage.getItem(USER_KEY);
+      
+      // إذا وجد في localStorage، انسخه لـ sessionStorage
+      if (token && userStr) {
+        sessionStorage.setItem(SESSION_KEY, token);
+        sessionStorage.setItem(USER_KEY, userStr);
+      }
+    }
+    
     if (token && userStr) {
+      // ✅ التحقق من صلاحية Token (JWT)
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const exp = payload.exp * 1000;
+        if (Date.now() >= exp) {
+          console.log('🔴 Token expired on load');
+          clearStoredSession();
+          return null;
+        }
+      } catch {
+        // Token غير صالح
+        clearStoredSession();
+        return null;
+      }
+      
       return { user: JSON.parse(userStr), token };
     }
   } catch (e) {
@@ -109,8 +142,10 @@ const getStoredSession = (): { user: AuthUser; token: string } | null => {
   return null;
 };
 
-// Clear session
+// ✅ Clear session from both storages
 const clearStoredSession = () => {
+  sessionStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(USER_KEY);
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(USER_KEY);
 };

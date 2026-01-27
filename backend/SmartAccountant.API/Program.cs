@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using SmartAccountant.API.Data;
 using SmartAccountant.API.Services;
 using System.Text.Json.Serialization;
@@ -27,19 +29,82 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 
+// ✅ JWT Service - للمصادقة الآمنة
+builder.Services.AddScoped<IJwtService, JwtService>();
+
+// ✅ JWT Authentication - تأمين حقيقي
+var jwtSettings = builder.Configuration.GetSection("Jwt");
+var jwtKey = jwtSettings["Key"] ?? throw new InvalidOperationException("JWT Key is not configured!");
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+        ValidateIssuer = true,
+        ValidIssuer = jwtSettings["Issuer"],
+        ValidateAudience = true,
+        ValidAudience = jwtSettings["Audience"],
+        ValidateLifetime = true,
+        ClockSkew = TimeSpan.Zero // لا تسامح في انتهاء الصلاحية
+    };
+    
+    // للتعامل مع أخطاء المصادقة
+    options.Events = new JwtBearerEvents
+    {
+        OnAuthenticationFailed = context =>
+        {
+            if (context.Exception.GetType() == typeof(SecurityTokenExpiredException))
+            {
+                context.Response.Headers.Append("Token-Expired", "true");
+            }
+            return Task.CompletedTask;
+        }
+    };
+});
+
+builder.Services.AddAuthorization();
+
 // Swagger/OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
-// CORS - Allow Frontend
+// ✅ CORS - محسّن للأمان
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.SetIsOriginAllowed(_ => true) // السماح لجميع المصادر في بيئة التطوير
+        if (builder.Environment.IsDevelopment())
+        {
+            // في بيئة التطوير - السماح للـ localhost فقط
+            policy.WithOrigins(
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "http://127.0.0.1:5173",
+                "http://127.0.0.1:3000"
+            )
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
+        }
+        else
+        {
+            // في بيئة الإنتاج - دومينات محددة فقط من الإعدادات
+            var allowedOrigins = builder.Configuration
+                .GetSection("AllowedOrigins")
+                .Get<string[]>() ?? Array.Empty<string>();
+            
+            policy.WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
     });
 });
 
@@ -51,8 +116,23 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+// ✅ Security Headers - حماية إضافية
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
+    context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
+    await next();
+});
+
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
+
+// ✅ Authentication & Authorization - ترتيب مهم!
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapControllers();
 
 // Initialize Database and Seed data
