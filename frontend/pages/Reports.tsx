@@ -507,59 +507,59 @@ const Reports: React.FC = () => {
        </div>
 
        {/* --- CONTROLS (SCREEN ONLY) --- */}
-       <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:hidden">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-            <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                <Filter size={20} className="text-primary dark:text-blue-400"/> 
+       <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:hidden">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 gap-3">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                <Filter size={18} className="text-primary dark:text-blue-400"/> 
                 إعدادات التقرير
             </h2>
             
-            {/* Quick Date Filters - Active State Added */}
-            <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-lg">
+            {/* Quick Date Filters */}
+            <div className="flex flex-wrap bg-slate-100 dark:bg-slate-700 p-1 rounded-lg gap-0.5">
                 <button 
                     onClick={() => setDateRange('all')} 
-                    className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${activePeriod === 'all' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                    className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all ${activePeriod === 'all' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
                     الكل
                 </button>
                 <button 
                     onClick={() => setDateRange('week')} 
-                    className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${activePeriod === 'week' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                    className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all ${activePeriod === 'week' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
-                    الأسبوع الحالي
+                    أسبوع
                 </button>
                 <button 
                     onClick={() => setDateRange('month')} 
-                    className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${activePeriod === 'month' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                    className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all ${activePeriod === 'month' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
-                    الشهر الحالي
+                    شهر
                 </button>
                 <button 
                     onClick={() => setDateRange('year')} 
-                    className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${activePeriod === 'year' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                    className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all ${activePeriod === 'year' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
-                    السنة الحالية
+                    سنة
                 </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
              {/* Dates */}
              <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">من تاريخ</label>
-                <DateInput value={startDate} onChange={(val) => handleCustomDateChange('start', val)} className="w-full border border-slate-200 dark:border-slate-600 p-2 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"/>
+                <DateInput value={startDate} onChange={(val) => handleCustomDateChange('start', val)} className="w-full border border-slate-200 dark:border-slate-600 p-1.5 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"/>
              </div>
              <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">إلى تاريخ</label>
-                <DateInput value={endDate} onChange={(val) => handleCustomDateChange('end', val)} className="w-full border border-slate-200 dark:border-slate-600 p-2 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"/>
+                <DateInput value={endDate} onChange={(val) => handleCustomDateChange('end', val)} className="w-full border border-slate-200 dark:border-slate-600 p-1.5 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"/>
              </div>
              
              {/* Customer Filter with Search */}
              <div className="relative customer-dropdown-container">
-                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5">
-                   <User size={14} className="text-blue-500" />
-                   عميل محدد
-                   <span className="text-slate-400 font-normal">(اختياري)</span>
+                 <label className="flex items-center gap-1 text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">
+                   <User size={12} className="text-blue-500" />
+                   عميل
+                   <span className="text-slate-400 font-normal text-[10px]">(اختياري)</span>
                  </label>
                  <div className="relative">
                    <input
@@ -568,9 +568,9 @@ const Reports: React.FC = () => {
                      value={customerSearch}
                      onChange={e => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }}
                      onFocus={() => setShowCustomerDropdown(true)}
-                     className={`w-full border border-slate-200 dark:border-slate-600 p-2.5 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white outline-none focus:border-primary pr-8 ${selectedCustomerId ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30' : ''}`}
+                     className={`w-full border border-slate-200 dark:border-slate-600 p-2 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white outline-none focus:border-primary pr-8 text-sm ${selectedCustomerId ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30' : ''}`}
                    />
-                   <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                   <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                    {selectedCustomerId && (
                      <button 
                        onClick={() => { setSelectedCustomerId(''); setCustomerSearch(''); }}
@@ -603,10 +603,10 @@ const Reports: React.FC = () => {
 
              {/* Product Filter with Search */}
              <div className="relative product-dropdown-container">
-                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5">
-                   <Package size={14} className="text-emerald-500" />
-                   منتج محدد
-                   <span className="text-slate-400 font-normal">(اختياري)</span>
+                 <label className="flex items-center gap-1 text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">
+                   <Package size={12} className="text-emerald-500" />
+                   منتج
+                   <span className="text-slate-400 font-normal text-[10px]">(اختياري)</span>
                  </label>
                  <div className="relative">
                    <input
@@ -615,9 +615,9 @@ const Reports: React.FC = () => {
                      value={productSearch}
                      onChange={e => { setProductSearch(e.target.value); setShowProductDropdown(true); }}
                      onFocus={() => setShowProductDropdown(true)}
-                     className={`w-full border border-slate-200 dark:border-slate-600 p-2.5 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white outline-none focus:border-primary pr-8 ${selectedProductId ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/30' : ''}`}
+                     className={`w-full border border-slate-200 dark:border-slate-600 p-2 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white outline-none focus:border-primary pr-8 text-sm ${selectedProductId ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/30' : ''}`}
                    />
-                   <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                   <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                    {selectedProductId && (
                      <button 
                        onClick={() => { setSelectedProductId(''); setProductSearch(''); }}

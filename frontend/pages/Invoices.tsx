@@ -177,10 +177,17 @@ const Invoices: React.FC = () => {
   }
   
   // Date Range Helper
-  const setDateRange = (type: 'all' | 'week' | 'month' | 'year') => {
+  const setDateRange = (type: 'all' | 'week' | 'month' | 'year' | 'custom') => {
     const today = new Date();
     let start = new Date();
     const end = today;
+    
+    const formatDateValue = (d: Date) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
     
     if (type === 'all') {
       setFilterDateFrom('');
@@ -194,14 +201,11 @@ const Invoices: React.FC = () => {
       start = new Date(today.getFullYear(), today.getMonth(), 1);
     } else if (type === 'year') {
       start = new Date(today.getFullYear(), 0, 1);
+    } else if (type === 'custom') {
+      // تاريخ مخصص - فترة سنة كاملة كقيمة افتراضية
+      start = new Date(today);
+      start.setFullYear(today.getFullYear() - 1);
     }
-    
-    const formatDateValue = (d: Date) => {
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
     
     setFilterDateFrom(formatDateValue(start));
     setFilterDateTo(formatDateValue(end));
@@ -998,66 +1002,70 @@ const Invoices: React.FC = () => {
           </div>
           
           {/* فلاتر الفترة الزمنية */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 print:hidden">
-            <div className="flex flex-wrap items-center gap-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-3 print:hidden">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
               {/* أزرار الفترة السريعة */}
-              <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-lg">
+              <div className="flex flex-wrap bg-slate-100 dark:bg-slate-700 p-1 rounded-lg gap-0.5">
                 <button 
                   onClick={() => setDateRange('all')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'all' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'all' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
                   الكل
                 </button>
                 <button 
                   onClick={() => setDateRange('week')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'week' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'week' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
-                  الأسبوع
+                  أسبوع
                 </button>
                 <button 
                   onClick={() => setDateRange('month')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'month' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'month' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
-                  الشهر
+                  شهر
                 </button>
                 <button 
                   onClick={() => setDateRange('year')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'year' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'year' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
-                  السنة
+                  سنة
                 </button>
                 <button 
-                  onClick={() => setFilterPeriod('custom')} 
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'custom' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                  onClick={() => setDateRange('custom')} 
+                  className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all ${filterPeriod === 'custom' ? 'bg-white dark:bg-slate-600 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
                 >
-                  تاريخ مخصص
+                  مخصص
                 </button>
               </div>
               
-              {/* حقول التاريخ المخصص - تظهر فقط عند اختيار "تاريخ مخصص" */}
+              {/* حقول التاريخ المخصص - تظهر فقط عند اختيار "مخصص" */}
               {filterPeriod === 'custom' && (
-                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
-                  <Calendar size={16} className="text-primary" />
-                  <span className="text-xs text-slate-500">من:</span>
-                  <DateInput
-                    value={filterDateFrom}
-                    onChange={setFilterDateFrom}
-                    className="px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:border-primary w-32"
-                    placeholder="يوم-شهر-سنة"
-                  />
-                  <span className="text-xs text-slate-500">إلى:</span>
-                  <DateInput
-                    value={filterDateTo}
-                    onChange={setFilterDateTo}
-                    className="px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:border-primary w-32"
-                    placeholder="يوم-شهر-سنة"
-                  />
+                <div className="flex flex-wrap items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
+                  <div className="flex items-center gap-1.5">
+                    <Calendar size={14} className="text-slate-400" />
+                    <span className="text-xs text-slate-500">من:</span>
+                    <DateInput
+                      value={filterDateFrom}
+                      onChange={setFilterDateFrom}
+                      className="px-2 py-1 text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:border-primary w-28"
+                      placeholder="يوم-شهر-سنة"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-slate-500">إلى:</span>
+                    <DateInput
+                      value={filterDateTo}
+                      onChange={setFilterDateTo}
+                      className="px-2 py-1 text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:border-primary w-28"
+                      placeholder="يوم-شهر-سنة"
+                    />
+                  </div>
                 </div>
               )}
               
               {/* عداد النتائج */}
-              <div className="text-xs text-slate-500 mr-auto">
-                عدد الفواتير: <span className="font-bold text-primary">{filteredInvoices.length}</span>
+              <div className="text-xs text-slate-500 sm:mr-auto">
+                <span className="font-bold text-primary">{filteredInvoices.length}</span> فاتورة
               </div>
             </div>
           </div>

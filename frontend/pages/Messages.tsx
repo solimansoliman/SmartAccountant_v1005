@@ -376,18 +376,18 @@ const Messages: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl">
-            <Mail className="text-indigo-600 dark:text-indigo-400" size={24} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
+            <Mail className="text-indigo-600 dark:text-indigo-400" size={18} />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-slate-800 dark:text-white">الرسائل</h2>
+            <h2 className="text-lg font-bold text-slate-800 dark:text-white">الرسائل</h2>
             {unreadCount > 0 && folder === 'inbox' && (
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {unreadCount} رسالة غير مقروءة
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {unreadCount} غير مقروءة
               </p>
             )}
           </div>
@@ -395,77 +395,78 @@ const Messages: React.FC = () => {
         
         <button
           onClick={() => setShowCompose(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
         >
-          <Plus size={18} />
-          رسالة جديدة
+          <Plus size={16} />
+          <span className="hidden sm:inline">رسالة جديدة</span>
+          <span className="sm:hidden">جديدة</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Sidebar - Messages List */}
-        <div className="lg:col-span-1 space-y-4">
+        <div className="lg:col-span-1 space-y-3">
           {/* Folder Tabs */}
-          <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+          <div className="flex p-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
             <button
               onClick={() => { setFolder('inbox'); setSelectedMessage(null); }}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
                 folder === 'inbox' 
                   ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow' 
                   : 'text-slate-500 dark:text-slate-400'
               }`}
             >
-              <Inbox size={16} />
+              <Inbox size={14} />
               الوارد
               {unreadCount > 0 && (
-                <span className="bg-indigo-600 text-white text-xs px-1.5 py-0.5 rounded-full">{unreadCount}</span>
+                <span className="bg-indigo-600 text-white text-[10px] px-1 py-0.5 rounded-full">{unreadCount}</span>
               )}
             </button>
             <button
               onClick={() => { setFolder('sent'); setSelectedMessage(null); }}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
                 folder === 'sent' 
                   ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow' 
                   : 'text-slate-500 dark:text-slate-400'
               }`}
             >
-              <Send size={16} />
+              <Send size={14} />
               المرسل
             </button>
           </div>
 
           {/* Search and Date Filter */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="relative">
-              <Search size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="بحث في الرسائل..."
+                placeholder="بحث..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pr-10 pl-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none"
+                className="w-full pr-8 pl-3 py-1.5 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none"
               />
             </div>
             
             {/* Date Filters */}
-            <div className="flex gap-2">
+            <div className="flex gap-1.5">
               <div className="relative flex-1">
-                <Calendar size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Calendar size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="date"
                   value={dateFrom}
                   onChange={e => setDateFrom(e.target.value)}
-                  className="w-full pr-8 pl-2 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none text-xs"
+                  className="w-full pr-7 pl-1 py-1 border border-slate-200 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none text-[10px]"
                   title="من تاريخ"
                 />
               </div>
               <div className="relative flex-1">
-                <Calendar size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Calendar size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="date"
                   value={dateTo}
                   onChange={e => setDateTo(e.target.value)}
-                  className="w-full pr-8 pl-2 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none text-xs"
+                  className="w-full pr-7 pl-1 py-1 border border-slate-200 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:border-indigo-500 outline-none text-[10px]"
                   title="إلى تاريخ"
                 />
               </div>
@@ -473,61 +474,68 @@ const Messages: React.FC = () => {
             
             {hasFilters && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">{filteredMessages.length} من {messages.length}</span>
+                <span className="text-[10px] text-slate-500">{filteredMessages.length} من {messages.length}</span>
                 <button
                   onClick={clearFilters}
-                  className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 hover:underline"
+                  className="flex items-center gap-0.5 text-[10px] text-red-600 dark:text-red-400 hover:underline"
                 >
-                  <X size={12} />
-                  مسح الفلاتر
+                  <X size={10} />
+                  مسح
                 </button>
               </div>
             )}
           </div>
 
-          {/* Messages List */}
+          {/* Messages List - Grid for Mobile */}
           <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-            <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-[500px] overflow-y-auto">
+            <div className="max-h-[500px] overflow-y-auto p-2">
               {filteredMessages.length === 0 ? (
-                <div className="p-8 text-center">
-                  <Mail className="mx-auto mb-3 text-slate-300 dark:text-slate-600" size={40} />
-                  <p className="text-slate-400">لا توجد رسائل</p>
+                <div className="p-6 text-center">
+                  <Mail className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                  <p className="text-sm text-slate-400">لا توجد رسائل</p>
                 </div>
               ) : (
-                filteredMessages.map(message => (
-                  <div
-                    key={message.id}
-                    onClick={() => handleSelectMessage(message)}
-                    className={`p-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors ${
-                      selectedMessage?.id === message.id ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''
-                    } ${!message.isRead && folder === 'inbox' ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full">
-                        <User size={16} className="text-slate-500" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className={`font-medium text-sm ${!message.isRead && folder === 'inbox' ? 'text-slate-800 dark:text-white' : 'text-slate-600 dark:text-slate-400'}`}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2">
+                  {filteredMessages.map(message => (
+                    <div
+                      key={message.id}
+                      onClick={() => handleSelectMessage(message)}
+                      className={`p-2.5 cursor-pointer rounded-lg border transition-colors ${
+                        selectedMessage?.id === message.id 
+                          ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-300 dark:border-indigo-600' 
+                          : 'border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                      } ${!message.isRead && folder === 'inbox' ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
+                    >
+                      {/* Header: Avatar + Name + Time */}
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full shrink-0">
+                            <User size={12} className="text-slate-500" />
+                          </div>
+                          <span className={`text-xs truncate ${!message.isRead && folder === 'inbox' ? 'font-bold text-slate-800 dark:text-white' : 'text-slate-600 dark:text-slate-400'}`}>
                             {folder === 'inbox' ? message.senderName : message.recipientName}
                           </span>
-                          <span className="text-xs text-slate-400">{formatMessageDate(message.createdAt)}</span>
                         </div>
-                        <p className={`text-sm truncate ${!message.isRead && folder === 'inbox' ? 'font-bold text-slate-800 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>
-                          {message.subject}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className={`text-xs px-1.5 py-0.5 rounded ${getPriorityColor(message.priority)}`}>
-                            {getPriorityLabel(message.priority)}
-                          </span>
-                          {message.isRead && folder === 'inbox' && (
-                            <CheckCheck size={14} className="text-emerald-500" />
-                          )}
-                        </div>
+                        <span className="text-[10px] text-slate-400 shrink-0">{formatMessageDate(message.createdAt)}</span>
+                      </div>
+                      
+                      {/* Subject */}
+                      <p className={`text-xs truncate ${!message.isRead && folder === 'inbox' ? 'font-bold text-slate-800 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>
+                        {message.subject}
+                      </p>
+                      
+                      {/* Footer: Priority + Read Status */}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className={`text-[10px] px-1 py-0.5 rounded ${getPriorityColor(message.priority)}`}>
+                          {getPriorityLabel(message.priority)}
+                        </span>
+                        {message.isRead && folder === 'inbox' && (
+                          <CheckCheck size={12} className="text-emerald-500" />
+                        )}
                       </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </div>
           </div>

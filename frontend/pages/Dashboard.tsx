@@ -317,16 +317,16 @@ const Dashboard: React.FC = () => {
     <div className="bg-white dark:bg-slate-800/80 p-2 sm:p-3 md:p-5 rounded-lg sm:rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 flex flex-col justify-between transition-all hover:shadow-md active:scale-[0.98] md:hover:scale-[1.02] duration-200 h-full relative overflow-hidden backdrop-blur-sm">
       <div className="flex items-start justify-between gap-1 sm:gap-2 mb-1 sm:mb-2 z-10">
           <div className="flex-1 min-w-0">
-            <p className="text-slate-600 dark:text-slate-300 text-[9px] sm:text-xs md:text-sm font-medium mb-0.5 sm:mb-1 leading-tight truncate">{title}</p>
-            <h3 className={`text-base sm:text-xl md:text-3xl font-black ${color} leading-none tracking-tight tabular-nums`} style={{fontFamily: 'system-ui, -apple-system, sans-serif'}}>
+            <p className="text-slate-600 dark:text-slate-300 text-[8px] sm:text-xs md:text-sm font-medium mb-0.5 sm:mb-1 leading-tight line-clamp-2 sm:truncate">{title}</p>
+            <h3 className={`text-sm sm:text-xl md:text-3xl font-black ${color} leading-none tracking-tight tabular-nums`} style={{fontFamily: 'system-ui, -apple-system, sans-serif'}}>
               {value.toLocaleString('en-US')}
             </h3>
             <div className="flex items-center gap-1 mt-0.5">
-              <span className="text-[7px] sm:text-[9px] md:text-xs text-slate-400 dark:text-slate-500 font-medium">{currency}</span>
+              <span className="text-[6px] sm:text-[9px] md:text-xs text-slate-400 dark:text-slate-500 font-medium">{currency}</span>
             </div>
           </div>
           <div className={`p-1 sm:p-2 md:p-3 rounded-md sm:rounded-lg md:rounded-xl bg-opacity-10 dark:bg-opacity-30 ${color.replace('text', 'bg')} shrink-0`}>
-            <Icon className={`${color} w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5`} />
+            <Icon className={`${color} w-3 h-3 sm:w-4 sm:h-4 md:w-5 md:h-5`} />
           </div>
       </div>
       {children && <div className="mt-1.5 sm:mt-3 md:mt-4 pt-1.5 sm:pt-2 md:pt-3 border-t border-slate-100 dark:border-slate-700/50 z-10">{children}</div>}
@@ -434,17 +434,24 @@ const Dashboard: React.FC = () => {
                 {totalExpenseAll > 0 && <span className="text-[7px] sm:text-[8px] md:text-[10px] text-white font-bold px-0.5">{((totalExpenseAll / totalVolume) * 100).toFixed(0)}%</span>}
               </div>
           </div>
-          <div className="grid grid-cols-3 gap-1 sm:gap-2 md:gap-3 mt-2 sm:mt-3 text-[8px] sm:text-[10px] md:text-xs">
-            <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-              <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-500 shrink-0"></div>
-              <span className="truncate"><b>{totalIncomeAll.toLocaleString()}</b></span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-2 md:gap-3 mt-2 sm:mt-3 text-[9px] sm:text-[10px] md:text-xs">
+            <div className="flex items-center justify-between sm:justify-start gap-1 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 rounded px-2 py-1 sm:bg-transparent sm:p-0">
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-500 shrink-0"></span>
+                <span>الإيرادات</span>
+              </span>
+              <b className="tabular-nums">{totalIncomeAll.toLocaleString()}</b>
             </div>
-            <div className="flex items-center gap-1 text-rose-600 dark:text-rose-400">
-              <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-rose-500 shrink-0"></div>
-              <span className="truncate"><b>{totalExpenseAll.toLocaleString()}</b></span>
+            <div className="flex items-center justify-between sm:justify-start gap-1 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 rounded px-2 py-1 sm:bg-transparent sm:p-0">
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-rose-500 shrink-0"></span>
+                <span>المصروفات</span>
+              </span>
+              <b className="tabular-nums">{totalExpenseAll.toLocaleString()}</b>
             </div>
-            <div className={`flex items-center justify-end gap-1 ${stats.netProfit >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400'}`}>
-              <span className="font-bold truncate">{stats.netProfit > 0 ? '+' : ''}{stats.netProfit.toLocaleString()}</span>
+            <div className={`flex items-center justify-between sm:justify-end gap-1 rounded px-2 py-1 sm:bg-transparent sm:p-0 ${stats.netProfit >= 0 ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20'}`}>
+              <span className="sm:hidden">الصافي</span>
+              <b className="tabular-nums">{stats.netProfit > 0 ? '+' : ''}{stats.netProfit.toLocaleString()}</b>
             </div>
           </div>
       </div>
@@ -455,7 +462,7 @@ const Dashboard: React.FC = () => {
         
         {/* Total Revenue with Breakdown */}
         <StatCard 
-          title="إجمالي المقبوضات (الكاش)" 
+          title="المقبوضات" 
           value={totalIncomeAll} 
           color="text-emerald-600 dark:text-emerald-400" 
           icon={Wallet}
@@ -478,7 +485,7 @@ const Dashboard: React.FC = () => {
         </StatCard>
 
         <StatCard 
-          title="الديون المستحقة (للمحل)" 
+          title="الديون المستحقة" 
           value={stats.outstandingDebts} 
           color="text-amber-600 dark:text-amber-400" 
           icon={CreditCard}
@@ -497,7 +504,7 @@ const Dashboard: React.FC = () => {
         </StatCard>
 
         <StatCard 
-          title="المصروفات والمشتريات" 
+          title="المصروفات" 
           value={totalExpenseAll} 
           color="text-rose-600 dark:text-rose-400" 
           icon={ArrowDownRight}

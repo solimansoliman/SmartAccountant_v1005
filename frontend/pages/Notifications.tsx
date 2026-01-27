@@ -179,24 +179,24 @@ const Notifications: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
-            <Bell className="text-blue-600 dark:text-blue-400" size={24} />
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+              <Bell className="text-blue-600 dark:text-blue-400" size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg sm:text-xl font-bold text-slate-800 dark:text-white">الإشعارات</h2>
+              {unreadCount > 0 && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {unreadCount} غير مقروء
+                </p>
+              )}
+            </div>
           </div>
-          <div>
-            <h2 className="text-2xl font-bold text-slate-800 dark:text-white">الإشعارات</h2>
-            {unreadCount > 0 && (
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {unreadCount} إشعار غير مقروء
-              </p>
-            )}
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-2">
+          
           <button
             onClick={fetchNotifications}
             className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
@@ -204,35 +204,36 @@ const Notifications: React.FC = () => {
           >
             <RefreshCw size={18} />
           </button>
-          
-          {notifications.length > 0 && (
-            <>
-              <button
-                onClick={handleMarkAllAsRead}
-                disabled={actionLoading || unreadCount === 0}
-                className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 disabled:opacity-50 transition-colors"
-              >
-                <CheckCheck size={16} />
-                تحديد الكل كمقروء
-              </button>
-              <button
-                onClick={handleDeleteAll}
-                disabled={actionLoading}
-                className="flex items-center gap-2 px-3 py-2 text-sm bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/50 disabled:opacity-50 transition-colors"
-              >
-                <Trash2 size={16} />
-                حذف الكل
-              </button>
-            </>
-          )}
         </div>
+        
+        {notifications.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleMarkAllAsRead}
+              disabled={actionLoading || unreadCount === 0}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 disabled:opacity-50 transition-colors"
+            >
+              <CheckCheck size={14} />
+              <span className="hidden sm:inline">تحديد الكل كمقروء</span>
+              <span className="sm:hidden">قراءة الكل</span>
+            </button>
+            <button
+              onClick={handleDeleteAll}
+              disabled={actionLoading}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/50 disabled:opacity-50 transition-colors"
+            >
+              <Trash2 size={14} />
+              حذف الكل
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg w-fit">
+      <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg w-full sm:w-fit">
         <button
           onClick={() => setFilter('all')}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+          className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
             filter === 'all' 
               ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow' 
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
@@ -242,7 +243,7 @@ const Notifications: React.FC = () => {
         </button>
         <button
           onClick={() => setFilter('unread')}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+          className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
             filter === 'unread' 
               ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow' 
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
@@ -253,133 +254,130 @@ const Notifications: React.FC = () => {
       </div>
 
       {/* Search and Date Filter */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-        <div className="flex flex-col sm:flex-row gap-3">
+      <div className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-200 dark:border-slate-700">
+        <div className="flex flex-col gap-2">
           {/* Search */}
-          <div className="relative flex-1">
-            <Search size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="relative">
+            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="بحث في الإشعارات..."
+              placeholder="بحث..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pr-10 pl-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:border-blue-500 outline-none"
+              className="w-full pr-9 pl-3 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:border-blue-500 outline-none text-sm"
             />
           </div>
           
-          {/* Date From */}
-          <div className="relative">
-            <Calendar size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={e => setDateFrom(e.target.value)}
-              className="pr-10 pl-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:border-blue-500 outline-none text-sm"
-              title="من تاريخ"
-            />
+          {/* Date Filters */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Calendar size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                className="w-full pr-8 pl-2 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:border-blue-500 outline-none text-xs"
+                title="من تاريخ"
+              />
+            </div>
+            <div className="relative flex-1">
+              <Calendar size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                className="w-full pr-8 pl-2 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:border-blue-500 outline-none text-xs"
+                title="إلى تاريخ"
+              />
+            </div>
+            {hasFilters && (
+              <button
+                onClick={clearFilters}
+                className="flex items-center gap-1 px-2 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
-          
-          {/* Date To */}
-          <div className="relative">
-            <Calendar size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="date"
-              value={dateTo}
-              onChange={e => setDateTo(e.target.value)}
-              className="pr-10 pl-4 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:border-blue-500 outline-none text-sm"
-              title="إلى تاريخ"
-            />
-          </div>
-          
-          {/* Clear Filters */}
-          {hasFilters && (
-            <button
-              onClick={clearFilters}
-              className="flex items-center gap-1 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-            >
-              <X size={16} />
-              مسح
-            </button>
-          )}
         </div>
         
         {hasFilters && (
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-            عرض {filteredNotifications.length} من {notifications.length} إشعار
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">
+            {filteredNotifications.length} من {notifications.length}
           </p>
         )}
       </div>
 
-      {/* Notifications List */}
-      <div className="space-y-3">
-        {filteredNotifications.length === 0 ? (
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-12 text-center border border-slate-200 dark:border-slate-700">
-            <Bell className="mx-auto mb-4 text-slate-300 dark:text-slate-600" size={48} />
-            <h3 className="text-lg font-medium text-slate-600 dark:text-slate-400 mb-2">لا توجد إشعارات</h3>
-            <p className="text-sm text-slate-400 dark:text-slate-500">
-              {hasFilters ? 'لا توجد نتائج للبحث' : filter === 'unread' ? 'تم قراءة جميع الإشعارات' : 'ستظهر الإشعارات الجديدة هنا'}
-            </p>
-          </div>
-        ) : (
-          filteredNotifications.map(notification => (
+      {/* Notifications List - Grid Layout */}
+      {filteredNotifications.length === 0 ? (
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-6 text-center border border-slate-200 dark:border-slate-700">
+          <Bell className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">لا توجد إشعارات</h3>
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            {hasFilters ? 'لا توجد نتائج للبحث' : filter === 'unread' ? 'تم قراءة جميع الإشعارات' : 'ستظهر الإشعارات الجديدة هنا'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+          {filteredNotifications.map(notification => (
             <div
               key={notification.id}
-              className={`rounded-xl border-2 p-4 transition-all hover:shadow-md ${getTypeBgColor(notification.type)} ${
+              className={`rounded-lg border p-2.5 transition-all hover:shadow-md ${getTypeBgColor(notification.type)} ${
                 !notification.isRead ? 'border-r-4' : ''
               }`}
             >
-              <div className="flex items-start gap-4">
-                <div className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm">
-                  {getTypeIcon(notification.type)}
-                </div>
-                
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <h4 className={`font-bold text-slate-800 dark:text-white ${!notification.isRead ? '' : 'opacity-70'}`}>
-                      {notification.title}
-                    </h4>
-                    <span className="text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
-                      {formatDate(notification.createdAt)}
-                    </span>
+              {/* Header: Icon + Date + Actions */}
+              <div className="flex items-center justify-between gap-1 mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="p-1 bg-white dark:bg-slate-800 rounded shadow-sm">
+                    {getTypeIcon(notification.type)}
                   </div>
-                  
-                  <p className={`text-sm text-slate-600 dark:text-slate-300 mt-1 ${!notification.isRead ? '' : 'opacity-70'}`}>
-                    {notification.message}
-                  </p>
-                  
-                  {notification.link && (
-                    <a
-                      href={notification.link}
-                      className="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline mt-2"
-                    >
-                      عرض التفاصيل
-                    </a>
-                  )}
+                  <span className="text-[9px] text-slate-400 dark:text-slate-500">
+                    {formatDate(notification.createdAt)}
+                  </span>
                 </div>
-                
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5">
                   {!notification.isRead && (
                     <button
                       onClick={() => handleMarkAsRead(notification.id)}
-                      className="p-2 text-emerald-500 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 rounded-lg transition-colors"
+                      className="p-1 text-emerald-500 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 rounded transition-colors"
                       title="تحديد كمقروء"
                     >
-                      <Check size={16} />
+                      <Check size={12} />
                     </button>
                   )}
                   <button
                     onClick={() => setDeleteId(notification.id)}
-                    className="p-2 text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
+                    className="p-1 text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/30 rounded transition-colors"
                     title="حذف"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={12} />
                   </button>
                 </div>
               </div>
+              
+              {/* Title */}
+              <h4 className={`font-bold text-xs text-slate-800 dark:text-white line-clamp-1 ${!notification.isRead ? '' : 'opacity-70'}`}>
+                {notification.title}
+              </h4>
+              
+              {/* Message */}
+              <p className={`text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-2 ${!notification.isRead ? '' : 'opacity-70'}`}>
+                {notification.message}
+              </p>
+              
+              {notification.link && (
+                <a
+                  href={notification.link}
+                  className="inline-block text-[10px] text-blue-600 dark:text-blue-400 hover:underline mt-1"
+                >
+                  عرض ←
+                </a>
+              )}
             </div>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {deleteId && (
