@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "c:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj": {}
+    "C:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj": {}
   },
   "projects": {
-    "c:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj": {
+    "C:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "c:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj",
+        "projectUniqueName": "C:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj",
         "projectName": "SmartAccountant.API",
-        "projectPath": "c:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj",
+        "projectPath": "C:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj",
         "packagesPath": "C:\\Users\\Mohamed Mohamed\\.nuget\\packages\\",
-        "outputPath": "c:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\obj\\",
+        "outputPath": "C:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages",
