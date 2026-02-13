@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Crown, Check, X, Zap, Star, Rocket, Building, 
   Loader2, ArrowRight, Sparkles, Shield, Clock,
-  Users, FileText, Package, UserCircle
+  Users, FileText, Package, UserCircle, AlertTriangle
 } from 'lucide-react';
 import { plansApi, ApiPlan } from '../services/adminApi';
 import { useNotification } from '../context/NotificationContext';
@@ -59,9 +59,134 @@ const Pricing: React.FC = () => {
   
   const [plans, setPlans] = useState<ApiPlan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [selectedPlan, setSelectedPlan] = useState<ApiPlan | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  // بيانات وهمية كبديل
+  const fallbackPlans: ApiPlan[] = [
+    {
+      id: 1,
+      name: 'مجاني',
+      nameEn: 'Free',
+      description: 'للبدء',
+      icon: 'Star',
+      color: 'slate',
+      price: 0,
+      yearlyPrice: 0,
+      currency: 'د.إ',
+      maxUsers: 1,
+      maxInvoices: 10,
+      maxCustomers: 5,
+      maxProducts: 5,
+      hasBasicReports: true,
+      hasAdvancedReports: false,
+      hasEmailSupport: true,
+      hasPrioritySupport: false,
+      hasDedicatedManager: false,
+      hasBackup: false,
+      hasCustomInvoices: false,
+      hasMultiCurrency: false,
+      hasApiAccess: false,
+      hasOfflineMode: false,
+      hasWhiteLabel: false,
+      backupFrequency: 'weekly',
+      isPopular: false,
+      sortOrder: 1,
+      isActive: true,
+    } as ApiPlan,
+    {
+      id: 2,
+      name: 'احترافي',
+      nameEn: 'Professional',
+      description: 'للشركات الصغيرة',
+      icon: 'Zap',
+      color: 'blue',
+      price: 99,
+      yearlyPrice: 990,
+      currency: 'د.إ',
+      maxUsers: 5,
+      maxInvoices: 100,
+      maxCustomers: 50,
+      maxProducts: 100,
+      hasBasicReports: true,
+      hasAdvancedReports: true,
+      hasEmailSupport: true,
+      hasPrioritySupport: true,
+      hasDedicatedManager: false,
+      hasBackup: true,
+      hasCustomInvoices: true,
+      hasMultiCurrency: false,
+      hasApiAccess: false,
+      hasOfflineMode: false,
+      hasWhiteLabel: false,
+      backupFrequency: 'daily',
+      isPopular: true,
+      sortOrder: 2,
+      isActive: true,
+    } as ApiPlan,
+    {
+      id: 3,
+      name: 'متقدم',
+      nameEn: 'Advanced',
+      description: 'للشركات الكبيرة',
+      icon: 'Rocket',
+      color: 'violet',
+      price: 299,
+      yearlyPrice: 2990,
+      currency: 'د.إ',
+      maxUsers: 20,
+      maxInvoices: 500,
+      maxCustomers: 500,
+      maxProducts: 1000,
+      hasBasicReports: true,
+      hasAdvancedReports: true,
+      hasEmailSupport: true,
+      hasPrioritySupport: true,
+      hasDedicatedManager: true,
+      hasBackup: true,
+      hasCustomInvoices: true,
+      hasMultiCurrency: true,
+      hasApiAccess: true,
+      hasOfflineMode: true,
+      hasWhiteLabel: false,
+      backupFrequency: 'instant',
+      isPopular: false,
+      sortOrder: 3,
+      isActive: true,
+    } as ApiPlan,
+    {
+      id: 4,
+      name: 'مؤسسي',
+      nameEn: 'Enterprise',
+      description: 'حل مخصص',
+      icon: 'Crown',
+      color: 'amber',
+      price: 999,
+      yearlyPrice: 9990,
+      currency: 'د.إ',
+      maxUsers: -1,
+      maxInvoices: -1,
+      maxCustomers: -1,
+      maxProducts: -1,
+      hasBasicReports: true,
+      hasAdvancedReports: true,
+      hasEmailSupport: true,
+      hasPrioritySupport: true,
+      hasDedicatedManager: true,
+      hasBackup: true,
+      hasCustomInvoices: true,
+      hasMultiCurrency: true,
+      hasApiAccess: true,
+      hasOfflineMode: true,
+      hasWhiteLabel: true,
+      backupFrequency: 'instant',
+      isPopular: false,
+      sortOrder: 4,
+      isActive: true,
+    } as ApiPlan,
+  ];
 
   useEffect(() => {
     loadPlans();
@@ -70,11 +195,18 @@ const Pricing: React.FC = () => {
   const loadPlans = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await plansApi.getAll(false); // فقط الخطط النشطة
-      setPlans(data.sort((a, b) => a.sortOrder - b.sortOrder));
+      if (data && data.length > 0) {
+        setPlans(data.sort((a, b) => a.sortOrder - b.sortOrder));
+      } else {
+        setError('لم يتم العثور على خطط متاحة');
+        setPlans(fallbackPlans);
+      }
     } catch (error) {
       console.error('Error loading plans:', error);
-      notify('فشل في تحميل الخطط', 'error');
+      setError('فشل في تحميل الخطط من الخادم. جاري عرض الخطط الافتراضية...');
+      setPlans(fallbackPlans);
     } finally {
       setLoading(false);
     }
@@ -151,8 +283,29 @@ const Pricing: React.FC = () => {
     );
   }
 
+  // شاشة الخطأ مع بيانات وهمية
+  const hasError = error && plans.length > 0;
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* رسالة الخطأ / التحذير */}
+      {error && (
+        <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" size={20} />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-300">{error}</p>
+              <button
+                onClick={loadPlans}
+                className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 underline"
+              >
+                ← إعادة المحاولة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="text-center mb-12">
         <div className="inline-flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-full text-sm font-medium mb-4">
@@ -190,121 +343,135 @@ const Pricing: React.FC = () => {
         </div>
       </div>
 
-      {/* Plans Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {plans.map((plan) => {
-          const colorStyle = planColors[plan.color] || planColors.blue;
-          const savings = getSavings(plan);
-          
-          return (
-            <div
-              key={plan.id}
-              className={`relative bg-white dark:bg-slate-800 rounded-2xl border-2 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 ${
-                plan.isPopular 
-                  ? `${colorStyle.border} shadow-lg ring-2 ring-${plan.color}-500/20` 
-                  : 'border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              {/* Popular Badge */}
-              {plan.isPopular && (
-                <div className={`absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r ${colorStyle.gradient} text-white text-xs font-bold px-4 py-1 rounded-full shadow-lg`}>
-                  الأكثر شعبية
-                </div>
-              )}
+      {/* Plans Grid - محسّن */}
+      {plans.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          {plans.map((plan) => {
+            const colorStyle = planColors[plan.color] || planColors.blue;
+            const savings = getSavings(plan);
+            
+            return (
+              <div
+                key={plan.id}
+                className={`relative bg-white dark:bg-slate-800 rounded-2xl border-2 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 overflow-hidden group ${
+                  plan.isPopular 
+                    ? `${colorStyle.border} shadow-lg` 
+                    : 'border-slate-200 dark:border-slate-700'
+                }`}
+              >
+                {/* Popular Badge */}
+                {plan.isPopular && (
+                  <div className={`absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r ${colorStyle.gradient} text-white text-xs font-bold px-4 py-1 rounded-full shadow-lg`}>
+                    الأكثر شعبية
+                  </div>
+                )}
 
-              <div className="p-6">
-                {/* Plan Header */}
-                <div className="flex items-start justify-between mb-6">
-                  <div>
-                    <PlanIcon icon={plan.icon} color={plan.color} />
-                    <h3 className="text-xl font-bold text-slate-800 dark:text-white mt-4">
-                      {plan.name}
-                    </h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                      {plan.description || plan.nameEn}
-                    </p>
+                <div className="p-6 h-full flex flex-col">
+                  {/* Plan Header */}
+                  <div className="flex items-start justify-between mb-6">
+                    <div className="flex-1">
+                      <PlanIcon icon={plan.icon} color={plan.color} />
+                      <h3 className="text-xl font-bold text-slate-800 dark:text-white mt-4">
+                        {plan.name}
+                      </h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                        {plan.description || plan.nameEn}
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                {/* Price */}
-                <div className="mb-6">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-4xl font-bold text-slate-800 dark:text-white">
-                      {getPrice(plan).toLocaleString()}
-                    </span>
-                    <span className="text-slate-500 dark:text-slate-400 text-sm">
-                      {plan.currency}
-                    </span>
-                    <span className="text-slate-400 dark:text-slate-500 text-sm">
-                      / {billingCycle === 'yearly' ? 'سنة' : 'شهر'}
-                    </span>
+                  {/* Price */}
+                  <div className="mb-6">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-4xl font-bold text-slate-800 dark:text-white">
+                        {getPrice(plan).toLocaleString()}
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-400 text-sm">
+                        {plan.currency}
+                      </span>
+                      <span className="text-slate-400 dark:text-slate-500 text-sm">
+                        / {billingCycle === 'yearly' ? 'سنة' : 'شهر'}
+                      </span>
+                    </div>
+                    {billingCycle === 'yearly' && savings && (
+                      <p className="text-sm text-emerald-600 dark:text-emerald-400 mt-1">
+                        توفير {savings}% مقارنة بالدفع الشهري
+                      </p>
+                    )}
                   </div>
-                  {billingCycle === 'yearly' && savings && (
-                    <p className="text-sm text-emerald-600 dark:text-emerald-400 mt-1">
-                      توفير {savings}% مقارنة بالدفع الشهري
-                    </p>
-                  )}
-                </div>
 
-                {/* Limits */}
-                <div className="space-y-3 pb-6 border-b border-slate-100 dark:border-slate-700">
-                  <div className="flex items-center gap-3 text-sm">
-                    <Users size={16} className={colorStyle.text} />
-                    <span className="text-slate-600 dark:text-slate-300">
-                      <strong>{formatLimit(plan.maxUsers)}</strong> مستخدم
-                    </span>
+                  {/* Limits */}
+                  <div className="space-y-3 pb-6 border-b border-slate-100 dark:border-slate-700">
+                    <div className="flex items-center gap-3 text-sm">
+                      <Users size={16} className={colorStyle.text} />
+                      <span className="text-slate-600 dark:text-slate-300">
+                        <strong>{formatLimit(plan.maxUsers)}</strong> مستخدم
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm">
+                      <FileText size={16} className={colorStyle.text} />
+                      <span className="text-slate-600 dark:text-slate-300">
+                        <strong>{formatLimit(plan.maxInvoices)}</strong> فاتورة/شهر
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm">
+                      <UserCircle size={16} className={colorStyle.text} />
+                      <span className="text-slate-600 dark:text-slate-300">
+                        <strong>{formatLimit(plan.maxCustomers)}</strong> عميل
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm">
+                      <Package size={16} className={colorStyle.text} />
+                      <span className="text-slate-600 dark:text-slate-300">
+                        <strong>{formatLimit(plan.maxProducts)}</strong> منتج
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <FileText size={16} className={colorStyle.text} />
-                    <span className="text-slate-600 dark:text-slate-300">
-                      <strong>{formatLimit(plan.maxInvoices)}</strong> فاتورة/شهر
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <UserCircle size={16} className={colorStyle.text} />
-                    <span className="text-slate-600 dark:text-slate-300">
-                      <strong>{formatLimit(plan.maxCustomers)}</strong> عميل
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <Package size={16} className={colorStyle.text} />
-                    <span className="text-slate-600 dark:text-slate-300">
-                      <strong>{formatLimit(plan.maxProducts)}</strong> منتج
-                    </span>
-                  </div>
-                </div>
 
-                {/* Features */}
-                <div className="py-6 space-y-1">
-                  <FeatureItem available={plan.hasBasicReports} text="التقارير الأساسية" />
-                  <FeatureItem available={plan.hasAdvancedReports} text="التقارير المتقدمة" />
-                  <FeatureItem available={plan.hasEmailSupport} text="الدعم عبر البريد" />
-                  <FeatureItem available={plan.hasPrioritySupport} text="الدعم ذو الأولوية" />
-                  <FeatureItem available={plan.hasDedicatedManager} text="مدير حساب مخصص" />
-                  <FeatureItem available={plan.hasBackup} text={`نسخ احتياطي ${plan.backupFrequency === 'instant' ? 'فوري' : plan.backupFrequency === 'daily' ? 'يومي' : 'أسبوعي'}`} />
-                  <FeatureItem available={plan.hasCustomInvoices} text="تخصيص الفواتير" />
-                  <FeatureItem available={plan.hasMultiCurrency} text="العملات المتعددة" />
-                  <FeatureItem available={plan.hasApiAccess} text="الوصول لـ API" />
-                  <FeatureItem available={plan.hasWhiteLabel} text="إزالة العلامة التجارية" />
-                </div>
+                  {/* Features */}
+                  <div className="py-6 space-y-1 flex-1">
+                    <FeatureItem available={plan.hasBasicReports} text="التقارير الأساسية" />
+                    <FeatureItem available={plan.hasAdvancedReports} text="التقارير المتقدمة" />
+                    <FeatureItem available={plan.hasEmailSupport} text="الدعم عبر البريد" />
+                    <FeatureItem available={plan.hasPrioritySupport} text="الدعم ذو الأولوية" />
+                    <FeatureItem available={plan.hasDedicatedManager} text="مدير حساب مخصص" />
+                    <FeatureItem available={plan.hasBackup} text={`نسخ احتياطي ${plan.backupFrequency === 'instant' ? 'فوري' : plan.backupFrequency === 'daily' ? 'يومي' : 'أسبوعي'}`} />
+                    <FeatureItem available={plan.hasCustomInvoices} text="تخصيص الفواتير" />
+                    <FeatureItem available={plan.hasMultiCurrency} text="العملات المتعددة" />
+                    <FeatureItem available={plan.hasApiAccess} text="الوصول لـ API" />
+                    <FeatureItem available={plan.hasOfflineMode} text="العمل بدون اتصال" />
+                    <FeatureItem available={plan.hasWhiteLabel} text="إزالة العلامة التجارية" />
+                  </div>
 
-                {/* CTA Button */}
-                <button
-                  onClick={() => handleSelectPlan(plan)}
-                  className={`w-full py-3 px-6 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
-                    plan.isPopular
-                      ? `bg-gradient-to-r ${colorStyle.gradient} text-white hover:shadow-lg hover:shadow-${plan.color}-500/25`
-                      : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600'
-                  }`}
-                >
-                  {plan.price === 0 ? 'ابدأ مجاناً' : 'اختر الخطة'}
-                  <ArrowRight size={16} />
-                </button>
+                  {/* CTA Button */}
+                  <button
+                    onClick={() => handleSelectPlan(plan)}
+                    className={`w-full py-3 px-6 rounded-xl font-medium transition-all flex items-center justify-center gap-2 mt-auto ${
+                      plan.isPopular
+                        ? `bg-gradient-to-r ${colorStyle.gradient} text-white hover:shadow-lg`
+                        : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600'
+                    }`}
+                  >
+                    {plan.price === 0 ? 'ابدأ مجاناً' : 'اختر الخطة'}
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <AlertTriangle className="mx-auto h-12 w-12 text-amber-500 mb-4" />
+          <p className="text-lg text-slate-600 dark:text-slate-400 mb-4">لم يتم العثور على خطط متاحة</p>
+          <button
+            onClick={loadPlans}
+            className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+          >
+            إعادة المحاولة
+          </button>
+        </div>
+      )}
 
       {/* Features Comparison - Optional */}
       <div className="mt-16 text-center">

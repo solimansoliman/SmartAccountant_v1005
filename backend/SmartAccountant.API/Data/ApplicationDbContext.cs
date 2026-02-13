@@ -35,6 +35,13 @@ namespace SmartAccountant.API.Data
         
         // Customers
         public DbSet<Customer> Customers { get; set; }
+        public DbSet<CustomerPhone> CustomerPhones { get; set; }
+        public DbSet<CustomerEmail> CustomerEmails { get; set; }
+        
+        // Geographic Data
+        public DbSet<Country> Countries { get; set; }
+        public DbSet<Province> Provinces { get; set; }
+        public DbSet<City> Cities { get; set; }
         
         // Invoices & Payments
         public DbSet<Invoice> Invoices { get; set; }
@@ -115,6 +122,10 @@ namespace SmartAccountant.API.Data
                 entity.Property(e => e.Address).HasMaxLength(500);
                 entity.Property(e => e.TaxNumber).HasMaxLength(50);
                 entity.Property(e => e.LogoUrl).HasMaxLength(500);
+                entity.Property(e => e.TaxId).HasMaxLength(50);
+                entity.Property(e => e.City).HasMaxLength(100);
+                entity.Property(e => e.State).HasMaxLength(100);
+                entity.Property(e => e.ZipCode).HasMaxLength(20);
                 
                 entity.HasOne(e => e.Currency)
                     .WithMany(c => c.Accounts)
@@ -241,8 +252,6 @@ namespace SmartAccountant.API.Data
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Code).IsRequired().HasMaxLength(50);
                 entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
-                entity.Property(e => e.TaxNumber).HasMaxLength(50);
-                entity.Property(e => e.CreditLimit).HasPrecision(18, 2);
                 entity.Property(e => e.Balance).HasPrecision(18, 2);
                 entity.HasIndex(e => new { e.AccountId, e.Code }).IsUnique();
                 
@@ -276,6 +285,129 @@ namespace SmartAccountant.API.Data
                 entity.HasOne(e => e.UpdatedByUser)
                     .WithMany()
                     .HasForeignKey(e => e.UpdatedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                    
+                // Navigation properties
+                entity.HasMany(e => e.Phones)
+                    .WithOne(e => e.Customer)
+                    .HasForeignKey(e => e.CustomerId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                    
+                entity.HasMany(e => e.Emails)
+                    .WithOne(e => e.Customer)
+                    .HasForeignKey(e => e.CustomerId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // CustomerPhone Configuration
+            modelBuilder.Entity<CustomerPhone>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.PhoneNumber).IsRequired().HasMaxLength(20);
+                entity.Property(e => e.PhoneType).IsRequired().HasMaxLength(50).HasDefaultValue("Mobile");
+                entity.Property(e => e.Notes).HasMaxLength(500);
+                
+                entity.HasOne(e => e.Customer)
+                    .WithMany(e => e.Phones)
+                    .HasForeignKey(e => e.CustomerId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // CustomerEmail Configuration
+            modelBuilder.Entity<CustomerEmail>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.EmailAddress).IsRequired().HasMaxLength(255);
+                entity.Property(e => e.EmailType).IsRequired().HasMaxLength(50).HasDefaultValue("Business");
+                entity.Property(e => e.Notes).HasMaxLength(500);
+                
+                entity.HasOne(e => e.Customer)
+                    .WithMany(e => e.Emails)
+                    .HasForeignKey(e => e.CustomerId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // Country Configuration
+            modelBuilder.Entity<Country>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Code).IsRequired().HasMaxLength(3);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.NameEn).HasMaxLength(100);
+                
+                entity.HasIndex(e => e.Code).IsUnique();
+                entity.HasIndex(e => e.IsActive);
+                
+                entity.HasMany(e => e.Provinces)
+                    .WithOne(p => p.Country)
+                    .HasForeignKey(p => p.CountryId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                    
+                entity.HasMany(e => e.Cities)
+                    .WithOne(c => c.Country)
+                    .HasForeignKey(c => c.CountryId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                    
+                entity.HasMany(e => e.Customers)
+                    .WithOne(c => c.Country)
+                    .HasForeignKey(c => c.CountryId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // Province Configuration
+            modelBuilder.Entity<Province>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Code).HasMaxLength(10);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.NameEn).HasMaxLength(100);
+                
+                entity.HasIndex(e => e.CountryId);
+                entity.HasIndex(e => e.IsActive);
+                entity.HasIndex(e => new { e.CountryId, e.Code }).IsUnique();
+                
+                entity.HasOne(e => e.Country)
+                    .WithMany(c => c.Provinces)
+                    .HasForeignKey(e => e.CountryId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                    
+                entity.HasMany(e => e.Cities)
+                    .WithOne(c => c.Province)
+                    .HasForeignKey(c => c.ProvinceId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                    
+                entity.HasMany(e => e.Customers)
+                    .WithOne(c => c.Province)
+                    .HasForeignKey(c => c.ProvinceId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // City Configuration
+            modelBuilder.Entity<City>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Code).HasMaxLength(10);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.NameEn).HasMaxLength(100);
+                
+                entity.HasIndex(e => e.ProvinceId);
+                entity.HasIndex(e => e.CountryId);
+                entity.HasIndex(e => e.IsActive);
+                entity.HasIndex(e => new { e.ProvinceId, e.Code }).IsUnique();
+                
+                entity.HasOne(e => e.Province)
+                    .WithMany(p => p.Cities)
+                    .HasForeignKey(e => e.ProvinceId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                    
+                entity.HasOne(e => e.Country)
+                    .WithMany(c => c.Cities)
+                    .HasForeignKey(e => e.CountryId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                    
+                entity.HasMany(e => e.Customers)
+                    .WithOne(c => c.City)
+                    .HasForeignKey(c => c.CityId)
                     .OnDelete(DeleteBehavior.Restrict);
             });
 

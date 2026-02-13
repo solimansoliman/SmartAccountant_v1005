@@ -201,10 +201,11 @@ namespace SmartAccountant.API.Controllers
             _context.Messages.Add(message);
             await _context.SaveChangesAsync();
 
+            var sender = await _context.Users.FindAsync(userId);
+
             // إرسال إشعار للمستلم
             if (dto.ReceiverId.HasValue)
             {
-                var sender = await _context.Users.FindAsync(userId);
                 _context.Notifications.Add(new Notification
                 {
                     AccountId = accountId,
@@ -212,10 +213,34 @@ namespace SmartAccountant.API.Controllers
                     Title = "رسالة جديدة",
                     Body = $"لديك رسالة جديدة من {sender?.FullName}",
                     Type = NotificationType.Info,
-                    ActionUrl = $"/messages/{message.Id}",
+                    ActionUrl = "/messages",
                     Icon = "mail"
                 });
                 await _context.SaveChangesAsync();
+            }
+            else
+            {
+                var users = await _context.Users
+                    .Where(u => u.AccountId == accountId && u.IsActive)
+                    .Select(u => u.Id)
+                    .ToListAsync();
+
+                if (users.Count > 0)
+                {
+                    var notifications = users.Select(targetUserId => new Notification
+                    {
+                        AccountId = accountId,
+                        UserId = targetUserId,
+                        Title = "رسالة جماعية جديدة",
+                        Body = $"تم إرسال رسالة جماعية من {sender?.FullName}",
+                        Type = NotificationType.Info,
+                        ActionUrl = "/messages",
+                        Icon = "mail"
+                    }).ToList();
+
+                    _context.Notifications.AddRange(notifications);
+                    await _context.SaveChangesAsync();
+                }
             }
 
             return CreatedAtAction(nameof(GetMessage), new { id = message.Id }, message);
@@ -269,27 +294,30 @@ namespace SmartAccountant.API.Controllers
         }
 
         /// <summary>
-        /// الحصول على جميع المستخدمين (للأدمن فقط)
+        /// الحصول على جميع المستخدمين في الحساب الحالي
         /// </summary>
         [HttpGet("all-users")]
         public async Task<ActionResult<IEnumerable<object>>> GetAllUsers()
         {
+            var accountId = GetAccountId();
             var userId = GetUserId();
 
             return await _context.Users
-                .Where(u => u.IsActive && u.Id != userId)
+                .Where(u => u.IsActive && u.Id != userId && u.AccountId == accountId)
                 .Select(u => new { u.Id, u.FullName, u.Username, u.Email, u.AccountId, Role = u.RoleType.ToString() })
                 .ToListAsync();
         }
 
         /// <summary>
-        /// الحصول على جميع الحسابات
+        /// الحصول على الحساب الحالي فقط
         /// </summary>
         [HttpGet("accounts")]
         public async Task<ActionResult<IEnumerable<object>>> GetAllAccounts()
         {
+            var accountId = GetAccountId();
+            
             return await _context.Accounts
-                .Where(a => a.IsActive)
+                .Where(a => a.Id == accountId && a.IsActive)
                 .Select(a => new { a.Id, a.Name, a.NameEn })
                 .ToListAsync();
         }

@@ -11,6 +11,7 @@ const MockDataGenerator: React.FC = () => {
   const [productCount, setProductCount] = useState<number>(10);
   const [customerCount, setCustomerCount] = useState<number>(5);
   const [isGenerating, setIsGenerating] = useState(false);
+    const [confirmArmedUntil, setConfirmArmedUntil] = useState<number>(0);
 
   const handleGenerate = () => {
     if (productCount < 1 || customerCount < 1) {
@@ -18,9 +19,14 @@ const MockDataGenerator: React.FC = () => {
         return;
     }
 
-    if (!window.confirm(`هل أنت متأكد من إضافة ${productCount} منتج و ${customerCount} عميل إلى قاعدة البيانات؟`)) {
+    const now = Date.now();
+    if (now > confirmArmedUntil) {
+        setConfirmArmedUntil(now + 5000);
+        notify(`تأكيد مطلوب: اضغط "بدء التوليد" مرة أخرى خلال 5 ثوانٍ لإضافة ${productCount} منتج و ${customerCount} عميل.`, 'warning');
         return;
     }
+
+    setConfirmArmedUntil(0);
 
     setIsGenerating(true);
     
@@ -75,7 +81,10 @@ const MockDataGenerator: React.FC = () => {
                          max="1000"
                          className="w-full border-2 border-slate-200 rounded-xl p-4 text-xl font-bold text-center text-slate-800 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none transition-all"
                          value={productCount}
-                         onChange={e => setProductCount(Number(e.target.value))}
+                                                 onChange={e => {
+                                                     setProductCount(Number(e.target.value));
+                                                     setConfirmArmedUntil(0);
+                                                 }}
                        />
                        <p className="text-xs text-slate-400 mt-2 text-center">أقصى حد 1000 منتج في المرة الواحدة</p>
                    </div>
@@ -91,7 +100,10 @@ const MockDataGenerator: React.FC = () => {
                          max="500"
                          className="w-full border-2 border-slate-200 rounded-xl p-4 text-xl font-bold text-center text-slate-800 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none transition-all"
                          value={customerCount}
-                         onChange={e => setCustomerCount(Number(e.target.value))}
+                                                 onChange={e => {
+                                                     setCustomerCount(Number(e.target.value));
+                                                     setConfirmArmedUntil(0);
+                                                 }}
                        />
                        <p className="text-xs text-slate-400 mt-2 text-center">سيتم إنشاء فواتير عشوائية لهم</p>
                    </div>

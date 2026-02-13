@@ -13,7 +13,7 @@ namespace SmartAccountant.API.Models
         
         public string RevenueNumber { get; set; } = string.Empty;
         public int CategoryId { get; set; }
-        public RevenueCategory Category { get; set; } = null!;
+        public RevenueCategory? Category { get; set; }
         public decimal Amount { get; set; }
         public decimal TaxAmount { get; set; }
         public decimal NetAmount { get; set; }

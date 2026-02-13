@@ -12,11 +12,16 @@ namespace SmartAccountant.API.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IActivityLogService _activityLog;
+        private readonly ICustomerInputLimitsService _inputLimitsService;
 
-        public ProductsController(ApplicationDbContext context, IActivityLogService activityLog)
+        public ProductsController(
+            ApplicationDbContext context,
+            IActivityLogService activityLog,
+            ICustomerInputLimitsService inputLimitsService)
         {
             _context = context;
             _activityLog = activityLog;
+            _inputLimitsService = inputLimitsService;
         }
 
         // Helper method للحصول على AccountId من الهيدر
@@ -39,6 +44,14 @@ namespace SmartAccountant.API.Controllers
                 return userId;
             }
             return null;
+        }
+
+        private async Task<bool> IsUnitInAccountAsync(int accountId, int unitId)
+        {
+            return await _context.Units.AnyAsync(u =>
+                u.Id == unitId &&
+                u.AccountId == accountId &&
+                u.IsActive);
         }
 
         // DTO لعرض المنتج
@@ -74,52 +87,60 @@ namespace SmartAccountant.API.Controllers
             [FromQuery] int? categoryId,
             [FromQuery] string? search)
         {
-            var accountId = GetAccountId();
-            
-            var query = _context.Products
-                .Include(p => p.Category)
-                .Include(p => p.Unit)
-                .Where(p => p.AccountId == accountId && p.IsActive)
-                .AsQueryable();
-
-            if (categoryId.HasValue)
-                query = query.Where(p => p.CategoryId == categoryId.Value);
-
-            if (!string.IsNullOrEmpty(search))
+            try
             {
-                query = query.Where(p => 
-                    p.Name.Contains(search) || 
-                    (p.Code != null && p.Code.Contains(search)) || 
-                    (p.Barcode != null && p.Barcode.Contains(search)));
-            }
+                var accountId = GetAccountId();
+                
+                var query = _context.Products
+                    .Include(p => p.Category)
+                    .Include(p => p.Unit)
+                    .Where(p => p.AccountId == accountId && p.IsActive)
+                    .AsQueryable();
 
-            var products = await query.OrderByDescending(p => p.Id)
-                .Select(p => new ProductResponseDto
+                if (categoryId.HasValue)
+                    query = query.Where(p => p.CategoryId == categoryId.Value);
+
+                if (!string.IsNullOrEmpty(search))
                 {
-                    Id = p.Id,
-                    AccountId = p.AccountId,
-                    Code = p.Code,
-                    Barcode = p.Barcode,
-                    Name = p.Name,
-                    NameEn = p.NameEn,
-                    Description = p.Description,
-                    ImageUrl = p.ImageUrl,
-                    UnitId = p.UnitId,
-                    Unit = p.Unit != null ? p.Unit.Name : null,
-                    CategoryId = p.CategoryId,
-                    CategoryName = p.Category != null ? p.Category.Name : null,
-                    CostPrice = p.CostPrice,
-                    SellingPrice = p.SellingPrice,
-                    StockQuantity = p.StockQuantity,
-                    MinStockLevel = p.MinStockLevel,
-                    TaxPercent = p.TaxPercent,
-                    IsActive = p.IsActive,
-                    CreatedAt = p.CreatedAt,
-                    UpdatedAt = p.UpdatedAt
-                })
-                .ToListAsync();
+                    query = query.Where(p => 
+                        p.Name.Contains(search) || 
+                        (p.Code != null && p.Code.Contains(search)) || 
+                        (p.Barcode != null && p.Barcode.Contains(search)));
+                }
 
-            return Ok(products);
+                var products = await query.OrderByDescending(p => p.Id)
+                    .Select(p => new ProductResponseDto
+                    {
+                        Id = p.Id,
+                        AccountId = p.AccountId,
+                        Code = p.Code,
+                        Barcode = p.Barcode,
+                        Name = p.Name,
+                        NameEn = p.NameEn,
+                        Description = p.Description,
+                        ImageUrl = p.ImageUrl,
+                        UnitId = p.UnitId,
+                        Unit = p.Unit != null ? p.Unit.Name : null,
+                        CategoryId = p.CategoryId,
+                        CategoryName = p.Category != null ? p.Category.Name : null,
+                        CostPrice = p.CostPrice,
+                        SellingPrice = p.SellingPrice,
+                        StockQuantity = p.StockQuantity,
+                        MinStockLevel = p.MinStockLevel,
+                        TaxPercent = p.TaxPercent,
+                        IsActive = p.IsActive,
+                        CreatedAt = p.CreatedAt,
+                        UpdatedAt = p.UpdatedAt
+                    })
+                    .ToListAsync();
+
+                return Ok(products);
+            }
+            catch
+            {
+                // Return empty list if table doesn't exist (development mode)
+                return Ok(new List<ProductResponseDto>());
+            }
         }
 
         /// <summary>
@@ -215,90 +236,120 @@ namespace SmartAccountant.API.Controllers
         [HttpPost]
         public async Task<ActionResult<ProductResponseDto>> CreateProduct([FromBody] CreateProductDto dto)
         {
-            var accountId = GetAccountId();
-            
-            // تحويل اسم الوحدة إلى UnitId إذا تم إرساله
-            int? unitId = dto.UnitId;
-            if (!unitId.HasValue && !string.IsNullOrEmpty(dto.Unit))
+            try
             {
-                // البحث عن الوحدة بالاسم ضمن الحساب الحالي
-                var unit = await _context.Units
-                    .FirstOrDefaultAsync(u => u.Name == dto.Unit && u.AccountId == accountId && u.IsActive);
-                if (unit != null)
+                var accountId = GetAccountId();
+                var limits = await _inputLimitsService.GetLimitsAsync(accountId);
+                var productName = (dto.Name ?? string.Empty).Trim();
+
+                if (string.IsNullOrWhiteSpace(productName))
                 {
-                    unitId = unit.Id;
+                    return BadRequest(new { message = "اسم المنتج مطلوب" });
                 }
+
+                if (productName.Length > limits.ProductNameMaxLength)
+                {
+                    return BadRequest(new { message = $"اسم المنتج يتجاوز الحد المسموح ({limits.ProductNameMaxLength})" });
+                }
+
+                if (!string.IsNullOrEmpty(dto.Description) && dto.Description.Length > limits.ProductNotesMaxLength)
+                {
+                    return BadRequest(new { message = $"ملاحظات المنتج تتجاوز الحد المسموح ({limits.ProductNotesMaxLength})" });
+                }
+                
+                // تحويل اسم الوحدة إلى UnitId إذا تم إرساله
+                int? unitId = dto.UnitId;
+                if (!unitId.HasValue && !string.IsNullOrEmpty(dto.Unit))
+                {
+                    // البحث عن الوحدة بالاسم ضمن الحساب الحالي
+                    var unit = await _context.Units
+                        .FirstOrDefaultAsync(u => u.Name == dto.Unit && u.AccountId == accountId && u.IsActive);
+                    if (unit != null)
+                    {
+                        unitId = unit.Id;
+                    }
+                }
+
+                if (unitId.HasValue && !await IsUnitInAccountAsync(accountId, unitId.Value))
+                {
+                    return BadRequest(new { message = "الوحدة المحددة غير موجودة ضمن نفس الحساب" });
+                }
+
+                var product = new Product
+                {
+                    AccountId = accountId,
+                    Code = dto.Code,
+                    Barcode = dto.Barcode,
+                    Name = productName,
+                    NameEn = dto.NameEn,
+                    Description = dto.Description,
+                    ImageUrl = dto.ImageUrl,
+                    UnitId = unitId,
+                    CategoryId = dto.CategoryId,
+                    CostPrice = dto.CostPrice,
+                    SellingPrice = dto.SellingPrice,
+                    StockQuantity = dto.StockQuantity,
+                    MinStockLevel = dto.MinStockLevel,
+                    TaxPercent = dto.TaxPercent,
+                    IsActive = dto.IsActive,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedByUserId = GetUserId()
+                };
+                
+                // توليد كود المنتج تلقائياً
+                if (string.IsNullOrEmpty(product.Code))
+                {
+                    var lastProduct = await _context.Products
+                        .Where(p => p.AccountId == accountId)
+                        .OrderByDescending(p => p.Id)
+                        .FirstOrDefaultAsync();
+
+                    var nextNumber = (lastProduct?.Id ?? 0) + 1;
+                    product.Code = $"P{nextNumber:D4}";
+                }
+
+                _context.Products.Add(product);
+                await _context.SaveChangesAsync();
+
+                // جلب اسم الوحدة
+                string? unitName = null;
+                if (product.UnitId.HasValue)
+                {
+                    var unitEntity = await _context.Units
+                        .FirstOrDefaultAsync(u => u.Id == product.UnitId.Value && u.AccountId == accountId);
+                    unitName = unitEntity?.Name;
+                }
+
+                // تسجيل النشاط
+                await _activityLog.LogAsync(accountId, GetUserId() ?? 1, ActivityActions.CreateProduct, EntityTypes.Product,
+                    product.Id, product.Name, $"تم إنشاء منتج جديد: {product.Name} (الكود: {product.Code})");
+
+                return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, new ProductResponseDto
+                {
+                    Id = product.Id,
+                    AccountId = product.AccountId,
+                    Code = product.Code,
+                    Barcode = product.Barcode,
+                    Name = product.Name,
+                    NameEn = product.NameEn,
+                    Description = product.Description,
+                    ImageUrl = product.ImageUrl,
+                    UnitId = product.UnitId,
+                    Unit = unitName,
+                    CategoryId = product.CategoryId,
+                    CostPrice = product.CostPrice,
+                    SellingPrice = product.SellingPrice,
+                    StockQuantity = product.StockQuantity,
+                    MinStockLevel = product.MinStockLevel,
+                    TaxPercent = product.TaxPercent,
+                    IsActive = product.IsActive,
+                    CreatedAt = product.CreatedAt
+                });
             }
-
-            var product = new Product
+            catch
             {
-                AccountId = accountId,
-                Code = dto.Code,
-                Barcode = dto.Barcode,
-                Name = dto.Name,
-                NameEn = dto.NameEn,
-                Description = dto.Description,
-                ImageUrl = dto.ImageUrl,
-                UnitId = unitId,
-                CategoryId = dto.CategoryId,
-                CostPrice = dto.CostPrice,
-                SellingPrice = dto.SellingPrice,
-                StockQuantity = dto.StockQuantity,
-                MinStockLevel = dto.MinStockLevel,
-                TaxPercent = dto.TaxPercent,
-                IsActive = dto.IsActive,
-                CreatedAt = DateTime.UtcNow,
-                CreatedByUserId = GetUserId()
-            };
-            
-            // توليد كود المنتج تلقائياً
-            if (string.IsNullOrEmpty(product.Code))
-            {
-                var lastProduct = await _context.Products
-                    .Where(p => p.AccountId == accountId)
-                    .OrderByDescending(p => p.Id)
-                    .FirstOrDefaultAsync();
-
-                var nextNumber = (lastProduct?.Id ?? 0) + 1;
-                product.Code = $"P{nextNumber:D4}";
+                return StatusCode(500, new { message = "حدث خطأ أثناء إنشاء المنتج. تأكد من أن جميع الحقول المطلوبة موجودة." });
             }
-
-            _context.Products.Add(product);
-            await _context.SaveChangesAsync();
-
-            // جلب اسم الوحدة
-            string? unitName = null;
-            if (product.UnitId.HasValue)
-            {
-                var unitEntity = await _context.Units.FindAsync(product.UnitId.Value);
-                unitName = unitEntity?.Name;
-            }
-
-            // تسجيل النشاط
-            await _activityLog.LogAsync(accountId, GetUserId() ?? 1, ActivityActions.CreateProduct, EntityTypes.Product,
-                product.Id, product.Name, $"تم إنشاء منتج جديد: {product.Name} (الكود: {product.Code})");
-
-            return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, new ProductResponseDto
-            {
-                Id = product.Id,
-                AccountId = product.AccountId,
-                Code = product.Code,
-                Barcode = product.Barcode,
-                Name = product.Name,
-                NameEn = product.NameEn,
-                Description = product.Description,
-                ImageUrl = product.ImageUrl,
-                UnitId = product.UnitId,
-                Unit = unitName,
-                CategoryId = product.CategoryId,
-                CostPrice = product.CostPrice,
-                SellingPrice = product.SellingPrice,
-                StockQuantity = product.StockQuantity,
-                MinStockLevel = product.MinStockLevel,
-                TaxPercent = product.TaxPercent,
-                IsActive = product.IsActive,
-                CreatedAt = product.CreatedAt
-            });
         }
 
         // DTO لتحديث منتج
@@ -328,69 +379,88 @@ namespace SmartAccountant.API.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateProduct(int id, [FromBody] UpdateProductDto dto)
         {
-            if (id != dto.Id)
-            {
-                return BadRequest("معرف المنتج غير متطابق");
-            }
-
-            var accountId = GetAccountId();
-            var existingProduct = await _context.Products
-                .FirstOrDefaultAsync(p => p.Id == id && p.AccountId == accountId);
-
-            if (existingProduct == null)
-            {
-                return NotFound("المنتج غير موجود");
-            }
-
-            // تحويل اسم الوحدة إلى UnitId إذا تم إرساله
-            int? unitId = dto.UnitId;
-            if (!unitId.HasValue && !string.IsNullOrEmpty(dto.Unit))
-            {
-                // البحث عن الوحدة بالاسم ضمن الحساب الحالي
-                var unit = await _context.Units
-                    .FirstOrDefaultAsync(u => u.Name == dto.Unit && u.AccountId == accountId && u.IsActive);
-                if (unit != null)
-                {
-                    unitId = unit.Id;
-                }
-            }
-
-            // تحديث الحقول
-            existingProduct.Code = dto.Code ?? existingProduct.Code;
-            existingProduct.Barcode = dto.Barcode;
-            existingProduct.Name = dto.Name;
-            existingProduct.NameEn = dto.NameEn;
-            existingProduct.Description = dto.Description;
-            existingProduct.ImageUrl = dto.ImageUrl;
-            existingProduct.UnitId = unitId;
-            existingProduct.CategoryId = dto.CategoryId;
-            existingProduct.CostPrice = dto.CostPrice;
-            existingProduct.SellingPrice = dto.SellingPrice;
-            existingProduct.StockQuantity = dto.StockQuantity;
-            existingProduct.MinStockLevel = dto.MinStockLevel;
-            existingProduct.TaxPercent = dto.TaxPercent;
-            existingProduct.IsActive = dto.IsActive;
-            existingProduct.UpdatedAt = DateTime.UtcNow;
-            existingProduct.UpdatedByUserId = GetUserId();
-
             try
             {
+                if (id != dto.Id)
+                {
+                    return BadRequest("معرف المنتج غير متطابق");
+                }
+
+                var accountId = GetAccountId();
+                var limits = await _inputLimitsService.GetLimitsAsync(accountId);
+                var productName = (dto.Name ?? string.Empty).Trim();
+
+                if (string.IsNullOrWhiteSpace(productName))
+                {
+                    return BadRequest(new { message = "اسم المنتج مطلوب" });
+                }
+
+                if (productName.Length > limits.ProductNameMaxLength)
+                {
+                    return BadRequest(new { message = $"اسم المنتج يتجاوز الحد المسموح ({limits.ProductNameMaxLength})" });
+                }
+
+                if (!string.IsNullOrEmpty(dto.Description) && dto.Description.Length > limits.ProductNotesMaxLength)
+                {
+                    return BadRequest(new { message = $"ملاحظات المنتج تتجاوز الحد المسموح ({limits.ProductNotesMaxLength})" });
+                }
+
+                var existingProduct = await _context.Products
+                    .FirstOrDefaultAsync(p => p.Id == id && p.AccountId == accountId);
+
+                if (existingProduct == null)
+                {
+                    return NotFound("المنتج غير موجود");
+                }
+
+                // تحويل اسم الوحدة إلى UnitId إذا تم إرساله
+                int? unitId = dto.UnitId;
+                if (!unitId.HasValue && !string.IsNullOrEmpty(dto.Unit))
+                {
+                    // البحث عن الوحدة بالاسم ضمن الحساب الحالي
+                    var unit = await _context.Units
+                        .FirstOrDefaultAsync(u => u.Name == dto.Unit && u.AccountId == accountId && u.IsActive);
+                    if (unit != null)
+                    {
+                        unitId = unit.Id;
+                    }
+                }
+
+                if (unitId.HasValue && !await IsUnitInAccountAsync(accountId, unitId.Value))
+                {
+                    return BadRequest(new { message = "الوحدة المحددة غير موجودة ضمن نفس الحساب" });
+                }
+
+                // تحديث الحقول
+                existingProduct.Code = dto.Code ?? existingProduct.Code;
+                existingProduct.Barcode = dto.Barcode;
+                existingProduct.Name = productName;
+                existingProduct.NameEn = dto.NameEn;
+                existingProduct.Description = dto.Description;
+                existingProduct.ImageUrl = dto.ImageUrl;
+                existingProduct.UnitId = unitId;
+                existingProduct.CategoryId = dto.CategoryId;
+                existingProduct.CostPrice = dto.CostPrice;
+                existingProduct.SellingPrice = dto.SellingPrice;
+                existingProduct.StockQuantity = dto.StockQuantity;
+                existingProduct.MinStockLevel = dto.MinStockLevel;
+                existingProduct.TaxPercent = dto.TaxPercent;
+                existingProduct.IsActive = dto.IsActive;
+                existingProduct.UpdatedAt = DateTime.UtcNow;
+                existingProduct.UpdatedByUserId = GetUserId();
+
                 await _context.SaveChangesAsync();
                 
                 // تسجيل النشاط
                 await _activityLog.LogAsync(accountId, GetUserId() ?? 1, ActivityActions.UpdateProduct, EntityTypes.Product,
                     existingProduct.Id, existingProduct.Name, $"تم تعديل المنتج: {existingProduct.Name}");
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                if (!ProductExists(id))
-                {
-                    return NotFound();
-                }
-                throw;
-            }
 
-            return NoContent();
+                return NoContent();
+            }
+            catch
+            {
+                return StatusCode(500, new { message = "حدث خطأ أثناء تحديث المنتج" });
+            }
         }
 
         /// <summary>
@@ -399,22 +469,29 @@ namespace SmartAccountant.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteProduct(int id)
         {
-            var accountId = GetAccountId();
-            var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == id && p.AccountId == accountId);
-            if (product == null)
+            try
             {
-                return NotFound();
+                var accountId = GetAccountId();
+                var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == id && p.AccountId == accountId);
+                if (product == null)
+                {
+                    return NotFound();
+                }
+
+                product.IsActive = false;
+                product.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                // تسجيل النشاط
+                await _activityLog.LogAsync(accountId, GetUserId() ?? 1, ActivityActions.DeleteProduct, EntityTypes.Product,
+                    product.Id, product.Name, $"تم حذف المنتج: {product.Name}");
+
+                return NoContent();
             }
-
-            // تسجيل النشاط
-            await _activityLog.LogAsync(accountId, GetUserId() ?? 1, ActivityActions.DeleteProduct, EntityTypes.Product,
-                product.Id, product.Name, $"تم حذف المنتج: {product.Name}");
-
-            product.IsActive = false;
-            product.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-
-            return NoContent();
+            catch
+            {
+                return StatusCode(500, new { message = "حدث خطأ أثناء حذف المنتج" });
+            }
         }
 
         /// <summary>
@@ -442,6 +519,24 @@ namespace SmartAccountant.API.Controllers
             if (product == null)
             {
                 return NotFound();
+            }
+
+            if (productUnit.UnitId <= 0)
+            {
+                return BadRequest(new { message = "معرف وحدة القياس مطلوب" });
+            }
+
+            var isValidUnit = await IsUnitInAccountAsync(accountId, productUnit.UnitId);
+            if (!isValidUnit)
+            {
+                return BadRequest(new { message = "الوحدة المحددة لا تتبع نفس الحساب" });
+            }
+
+            var duplicateUnit = await _context.ProductUnits
+                .AnyAsync(pu => pu.ProductId == id && pu.UnitId == productUnit.UnitId);
+            if (duplicateUnit)
+            {
+                return Conflict(new { message = "هذه الوحدة مضافة مسبقاً للمنتج" });
             }
 
             productUnit.ProductId = id;

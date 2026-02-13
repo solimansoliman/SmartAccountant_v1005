@@ -86,17 +86,69 @@ export interface UpdateUserDto {
 }
 
 // Helper for API calls
+function getAuthHeaders(): HeadersInit {
+  const headers: HeadersInit = {};
+
+  const token = sessionStorage.getItem('smart_accountant_session')
+    || localStorage.getItem('smart_accountant_session');
+  const userRaw = sessionStorage.getItem('smart_accountant_user')
+    || localStorage.getItem('smart_accountant_user');
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  if (userRaw) {
+    try {
+      const user = JSON.parse(userRaw);
+      if (user?.accountId) {
+        headers['X-Account-Id'] = user.accountId.toString();
+      }
+      if (user?.id) {
+        headers['X-User-Id'] = user.id.toString();
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }
+
+  return headers;
+}
+
 async function apiCall<T>(url: string, options?: RequestInit): Promise<T> {
+  const authHeaders = getAuthHeaders();
+  const extraHeaders = options?.headers || {};
+
   const response = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders,
+      ...(extraHeaders as Record<string, string>),
     },
     ...options,
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'حدث خطأ' }));
-    throw new Error(error.message || 'حدث خطأ في الاتصال');
+
+    const extractErrorMessage = (payload: any): string => {
+      if (!payload) return 'حدث خطأ في الاتصال';
+      if (typeof payload === 'string') return payload;
+      if (typeof payload.message === 'string' && payload.message.trim()) return payload.message;
+      if (typeof payload.title === 'string' && payload.title.trim()) return payload.title;
+
+      const errors = payload.errors;
+      if (errors && typeof errors === 'object') {
+        const firstEntry = Object.values(errors).find((value) => Array.isArray(value) && value.length > 0) as string[] | undefined;
+        if (firstEntry?.[0]) {
+          return firstEntry[0];
+        }
+      }
+
+      return 'حدث خطأ في الاتصال';
+    };
+
+    throw new Error(extractErrorMessage(error));
   }
 
   // Handle empty responses (204 No Content)
@@ -318,6 +370,7 @@ export interface AccountUsageDto {
   hasCustomInvoices: boolean;
   hasMultiCurrency: boolean;
   hasApiAccess: boolean;
+  hasOfflineMode: boolean;
   hasWhiteLabel: boolean;
   
   // Subscription Info
@@ -480,6 +533,7 @@ export interface ApiPlan {
   hasCustomInvoices: boolean;
   hasMultiCurrency: boolean;
   hasApiAccess: boolean;
+  hasOfflineMode: boolean;
   hasWhiteLabel: boolean;
   createdAt: string;
   updatedAt: string;
@@ -511,6 +565,7 @@ export interface CreatePlanDto {
   hasCustomInvoices?: boolean;
   hasMultiCurrency?: boolean;
   hasApiAccess?: boolean;
+  hasOfflineMode?: boolean;
   hasWhiteLabel?: boolean;
 }
 

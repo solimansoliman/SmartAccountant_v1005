@@ -13,11 +13,16 @@ namespace SmartAccountant.API.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IActivityLogService _activityLog;
+        private readonly ICustomerInputLimitsService _inputLimitsService;
 
-        public InvoicesController(ApplicationDbContext context, IActivityLogService activityLog)
+        public InvoicesController(
+            ApplicationDbContext context,
+            IActivityLogService activityLog,
+            ICustomerInputLimitsService inputLimitsService)
         {
             _context = context;
             _activityLog = activityLog;
+            _inputLimitsService = inputLimitsService;
         }
 
         // Helper method للحصول على AccountId من الهيدر
@@ -41,6 +46,26 @@ namespace SmartAccountant.API.Controllers
             return 1;
         }
 
+        private static InvoiceStatus ResolveInvoiceStatus(Invoice invoice)
+        {
+            if (invoice.PaidAmount >= invoice.TotalAmount && invoice.TotalAmount > 0)
+            {
+                return InvoiceStatus.Paid;
+            }
+
+            if (invoice.PaidAmount > 0)
+            {
+                return InvoiceStatus.PartialPaid;
+            }
+
+            if (invoice.Status == InvoiceStatus.Draft || invoice.Status == InvoiceStatus.Cancelled)
+            {
+                return invoice.Status;
+            }
+
+            return InvoiceStatus.Confirmed;
+        }
+
         /// <summary>
         /// الحصول على جميع الفواتير
         /// </summary>
@@ -53,7 +78,8 @@ namespace SmartAccountant.API.Controllers
             [FromQuery] int? customerId)
         {
             var accountId = GetAccountId();
-            var query = _context.Invoices
+
+            IQueryable<Invoice> query = _context.Invoices
                 .Include(i => i.Customer)
                 .Include(i => i.Items)
                 .Where(i => i.AccountId == accountId)
@@ -74,9 +100,39 @@ namespace SmartAccountant.API.Controllers
             if (customerId.HasValue)
                 query = query.Where(i => i.CustomerId == customerId.Value);
 
-            return await query.OrderByDescending(i => i.InvoiceDate)
-                .ThenByDescending(i => i.Id)
-                .ToListAsync();
+            try
+            {
+                return await query.OrderByDescending(i => i.InvoiceDate)
+                    .ThenByDescending(i => i.Id)
+                    .ToListAsync();
+            }
+            catch
+            {
+                // Fallback for legacy schemas missing optional relationship columns.
+                var fallbackQuery = _context.Invoices
+                    .Where(i => i.AccountId == accountId)
+                    .AsQueryable();
+
+                if (type.HasValue)
+                    fallbackQuery = fallbackQuery.Where(i => i.InvoiceType == type.Value);
+
+                if (status.HasValue)
+                    fallbackQuery = fallbackQuery.Where(i => i.Status == status.Value);
+
+                if (fromDate.HasValue)
+                    fallbackQuery = fallbackQuery.Where(i => i.InvoiceDate >= fromDate.Value);
+
+                if (toDate.HasValue)
+                    fallbackQuery = fallbackQuery.Where(i => i.InvoiceDate <= toDate.Value);
+
+                if (customerId.HasValue)
+                    fallbackQuery = fallbackQuery.Where(i => i.CustomerId == customerId.Value);
+
+                return await fallbackQuery
+                    .OrderByDescending(i => i.InvoiceDate)
+                    .ThenByDescending(i => i.Id)
+                    .ToListAsync();
+            }
         }
 
         /// <summary>
@@ -86,22 +142,41 @@ namespace SmartAccountant.API.Controllers
         public async Task<ActionResult<Invoice>> GetInvoice(int id)
         {
             var accountId = GetAccountId();
-            var invoice = await _context.Invoices
-                .Include(i => i.Customer)
-                .Include(i => i.User)
-                .Include(i => i.Items)
-                .ThenInclude(l => l.Product)
-                .Include(i => i.Items)
-                .ThenInclude(l => l.Unit)
-                .Include(i => i.Payments)
-                .FirstOrDefaultAsync(i => i.Id == id && i.AccountId == accountId);
 
-            if (invoice == null)
+            try
             {
-                return NotFound();
-            }
+                var invoice = await _context.Invoices
+                    .Include(i => i.Customer)
+                    .Include(i => i.User)
+                    .Include(i => i.Items)
+                    .ThenInclude(l => l.Product)
+                    .Include(i => i.Items)
+                    .ThenInclude(l => l.Unit)
+                    .Include(i => i.Payments)
+                    .FirstOrDefaultAsync(i => i.Id == id && i.AccountId == accountId);
 
-            return invoice;
+                if (invoice == null)
+                {
+                    return NotFound();
+                }
+
+                return invoice;
+            }
+            catch
+            {
+                // Fallback for legacy schemas missing optional relationship columns.
+                var fallbackInvoice = await _context.Invoices
+                    .Include(i => i.Customer)
+                    .Include(i => i.Items)
+                    .FirstOrDefaultAsync(i => i.Id == id && i.AccountId == accountId);
+
+                if (fallbackInvoice == null)
+                {
+                    return NotFound();
+                }
+
+                return fallbackInvoice;
+            }
         }
 
         /// <summary>
@@ -111,16 +186,66 @@ namespace SmartAccountant.API.Controllers
         public async Task<ActionResult<Invoice>> CreateInvoice([FromBody] CreateInvoiceDto dto)
         {
             var accountId = GetAccountId();
+            var limits = await _inputLimitsService.GetLimitsAsync(accountId);
+
+            if (!string.IsNullOrEmpty(dto.Notes) && dto.Notes.Length > limits.InvoiceNotesMaxLength)
+            {
+                return BadRequest(new { message = $"ملاحظات الفاتورة تتجاوز الحد المسموح ({limits.InvoiceNotesMaxLength})" });
+            }
             
             // فلترة البنود ذات ProductId صحيح فقط
             var validItems = dto.Items.Where(i => i.ProductId > 0).ToList();
+
+            if (!validItems.Any())
+            {
+                return BadRequest(new { message = "الفاتورة يجب أن تحتوي على بند منتج واحد على الأقل" });
+            }
+
+            int? customerId = null;
+            if (dto.CustomerId > 0)
+            {
+                customerId = dto.CustomerId;
+                var customerExists = await _context.Customers
+                    .AnyAsync(c => c.Id == customerId.Value && c.AccountId == accountId && c.IsActive);
+                if (!customerExists)
+                {
+                    return BadRequest(new { message = "العميل المحدد غير موجود ضمن الحساب الحالي" });
+                }
+            }
+
+            var productIds = validItems.Select(i => i.ProductId).Distinct().ToList();
+            var productsById = await _context.Products
+                .Where(p => p.AccountId == accountId && productIds.Contains(p.Id) && p.IsActive)
+                .ToDictionaryAsync(p => p.Id);
+
+            if (productsById.Count != productIds.Count)
+            {
+                return BadRequest(new { message = "يوجد منتج واحد أو أكثر غير موجود ضمن الحساب الحالي" });
+            }
+
+            var unitIds = validItems
+                .Where(i => i.UnitId.HasValue && i.UnitId.Value > 0)
+                .Select(i => i.UnitId!.Value)
+                .Distinct()
+                .ToList();
+
+            if (unitIds.Any())
+            {
+                var unitsCount = await _context.Units
+                    .CountAsync(u => u.AccountId == accountId && u.IsActive && unitIds.Contains(u.Id));
+
+                if (unitsCount != unitIds.Count)
+                {
+                    return BadRequest(new { message = "يوجد وحدة واحدة أو أكثر غير موجودة ضمن الحساب الحالي" });
+                }
+            }
             
             // تحويل الـ DTO إلى Invoice
             var invoice = new Invoice
             {
                 AccountId = accountId,
                 InvoiceType = dto.InvoiceType,
-                CustomerId = dto.CustomerId,
+                CustomerId = customerId,
                 InvoiceDate = dto.InvoiceDate,
                 DueDate = dto.DueDate,
                 Notes = dto.Notes,
@@ -132,7 +257,7 @@ namespace SmartAccountant.API.Controllers
                 Items = validItems.Select(i => new InvoiceItem
                 {
                     ProductId = i.ProductId,
-                    ProductName = i.ProductName,
+                    ProductName = string.IsNullOrWhiteSpace(i.ProductName) ? productsById[i.ProductId].Name ?? string.Empty : i.ProductName,
                     UnitId = i.UnitId,
                     Quantity = i.Quantity,
                     UnitPrice = i.UnitPrice,
@@ -152,7 +277,7 @@ namespace SmartAccountant.API.Controllers
                 // حفظ اسم المنتج
                 if (string.IsNullOrEmpty(item.ProductName))
                 {
-                    var product = await _context.Products.FindAsync(item.ProductId);
+                    var product = productsById[item.ProductId];
                     item.ProductName = product?.Name ?? "";
                 }
 
@@ -232,6 +357,13 @@ namespace SmartAccountant.API.Controllers
         public async Task<IActionResult> UpdateInvoice(int id, [FromBody] CreateInvoiceDto dto)
         {
             var accountId = GetAccountId();
+            var limits = await _inputLimitsService.GetLimitsAsync(accountId);
+
+            if (!string.IsNullOrEmpty(dto.Notes) && dto.Notes.Length > limits.InvoiceNotesMaxLength)
+            {
+                return BadRequest(new { message = $"ملاحظات الفاتورة تتجاوز الحد المسموح ({limits.InvoiceNotesMaxLength})" });
+            }
+
             var invoice = await _context.Invoices
                 .Include(i => i.Items)
                 .FirstOrDefaultAsync(i => i.Id == id && i.AccountId == accountId);
@@ -252,17 +384,38 @@ namespace SmartAccountant.API.Controllers
             {
                 if (item.ProductId > 0)
                 {
-                    var productExists = await _context.Products.AnyAsync(p => p.Id == item.ProductId);
+                    var productExists = await _context.Products.AnyAsync(p => p.Id == item.ProductId && p.AccountId == accountId && p.IsActive);
                     if (!productExists)
                     {
-                        return BadRequest($"المنتج برقم {item.ProductId} غير موجود");
+                        return BadRequest($"المنتج برقم {item.ProductId} غير موجود ضمن الحساب الحالي");
                     }
+                }
+
+                if (item.UnitId.HasValue && item.UnitId.Value > 0)
+                {
+                    var unitExists = await _context.Units.AnyAsync(u => u.Id == item.UnitId.Value && u.AccountId == accountId && u.IsActive);
+                    if (!unitExists)
+                    {
+                        return BadRequest($"الوحدة برقم {item.UnitId.Value} غير موجودة ضمن الحساب الحالي");
+                    }
+                }
+            }
+
+            int? customerId = null;
+            if (dto.CustomerId > 0)
+            {
+                customerId = dto.CustomerId;
+                var customerExists = await _context.Customers
+                    .AnyAsync(c => c.Id == customerId.Value && c.AccountId == accountId && c.IsActive);
+                if (!customerExists)
+                {
+                    return BadRequest(new { message = "العميل المحدد غير موجود ضمن الحساب الحالي" });
                 }
             }
 
             // تحديث بيانات الفاتورة
             invoice.InvoiceType = dto.InvoiceType;
-            invoice.CustomerId = dto.CustomerId;
+            invoice.CustomerId = customerId;
             invoice.InvoiceDate = dto.InvoiceDate;
             invoice.DueDate = dto.DueDate;
             invoice.Notes = dto.Notes;
@@ -299,7 +452,7 @@ namespace SmartAccountant.API.Controllers
             {
                 if (string.IsNullOrEmpty(item.ProductName))
                 {
-                    var product = await _context.Products.FindAsync(item.ProductId);
+                    var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId && p.AccountId == accountId);
                     item.ProductName = product?.Name ?? "";
                 }
 
@@ -366,7 +519,7 @@ namespace SmartAccountant.API.Controllers
             // تحديث المخزون
             foreach (var item in invoice.Items)
             {
-                var product = await _context.Products.FindAsync(item.ProductId);
+                var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId && p.AccountId == accountId);
                 if (product != null)
                 {
                     if (invoice.InvoiceType == InvoiceType.Sales)
@@ -383,7 +536,7 @@ namespace SmartAccountant.API.Controllers
             // تحديث رصيد العميل
             if (invoice.CustomerId.HasValue && invoice.PaymentMethod == PaymentMethod.Credit)
             {
-                var customer = await _context.Customers.FindAsync(invoice.CustomerId.Value);
+                var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId.Value && c.AccountId == accountId);
                 if (customer != null)
                 {
                     if (invoice.InvoiceType == InvoiceType.Sales)
@@ -447,7 +600,7 @@ namespace SmartAccountant.API.Controllers
             {
                 foreach (var item in invoice.Items)
                 {
-                    var product = await _context.Products.FindAsync(item.ProductId);
+                    var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId && p.AccountId == accountId);
                     if (product != null)
                     {
                         if (invoice.InvoiceType == InvoiceType.Sales)
@@ -464,7 +617,7 @@ namespace SmartAccountant.API.Controllers
                 // إعادة رصيد العميل إذا كانت آجلة
                 if (invoice.CustomerId.HasValue && invoice.PaymentMethod == PaymentMethod.Credit)
                 {
-                    var customer = await _context.Customers.FindAsync(invoice.CustomerId.Value);
+                    var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId.Value && c.AccountId == accountId);
                     if (customer != null)
                     {
                         if (invoice.InvoiceType == InvoiceType.Sales)
@@ -509,7 +662,38 @@ namespace SmartAccountant.API.Controllers
                 return BadRequest("لا يمكن إضافة دفعة لفاتورة ملغاة");
             }
 
+            if (payment.Amount <= 0)
+            {
+                return BadRequest("قيمة الدفعة يجب أن تكون أكبر من صفر");
+            }
+
+            if (invoice.PaidAmount + payment.Amount > invoice.TotalAmount)
+            {
+                return BadRequest("قيمة الدفعة تتجاوز المبلغ المتبقي في الفاتورة");
+            }
+
+            if (invoice.CustomerId.HasValue)
+            {
+                payment.CustomerId ??= invoice.CustomerId;
+            }
+
+            if (payment.CustomerId.HasValue)
+            {
+                if (invoice.CustomerId.HasValue && payment.CustomerId.Value != invoice.CustomerId.Value)
+                {
+                    return BadRequest("العميل في الدفعة لا يطابق عميل الفاتورة");
+                }
+
+                var customerExists = await _context.Customers
+                    .AnyAsync(c => c.Id == payment.CustomerId.Value && c.AccountId == accountId);
+                if (!customerExists)
+                {
+                    return BadRequest("العميل المحدد غير موجود ضمن الحساب الحالي");
+                }
+            }
+
             payment.InvoiceId = id;
+            payment.AccountId = accountId;
             payment.CreatedAt = DateTime.UtcNow;
 
             _context.Payments.Add(payment);
@@ -518,19 +702,12 @@ namespace SmartAccountant.API.Controllers
             invoice.PaidAmount += payment.Amount;
             
             // تحديث حالة الفاتورة
-            if (invoice.PaidAmount >= invoice.TotalAmount)
-            {
-                invoice.Status = InvoiceStatus.Paid;
-            }
-            else if (invoice.PaidAmount > 0)
-            {
-                invoice.Status = InvoiceStatus.PartialPaid;
-            }
+            invoice.Status = ResolveInvoiceStatus(invoice);
 
             // تحديث رصيد العميل
             if (invoice.CustomerId.HasValue)
             {
-                var customer = await _context.Customers.FindAsync(invoice.CustomerId.Value);
+                var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId.Value && c.AccountId == accountId);
                 if (customer != null)
                 {
                     customer.Balance -= payment.Amount;
@@ -563,7 +740,7 @@ namespace SmartAccountant.API.Controllers
                 return NotFound("الفاتورة غير موجودة");
             }
 
-            var payment = invoice.Payments?.FirstOrDefault(p => p.Id == paymentId);
+            var payment = invoice.Payments?.FirstOrDefault(p => p.Id == paymentId && p.AccountId == accountId);
             if (payment == null)
             {
                 return NotFound("الدفعة غير موجودة");
@@ -580,23 +757,12 @@ namespace SmartAccountant.API.Controllers
             if (invoice.PaidAmount < 0) invoice.PaidAmount = 0;
 
             // تحديث حالة الفاتورة
-            if (invoice.PaidAmount >= invoice.TotalAmount)
-            {
-                invoice.Status = InvoiceStatus.Paid;
-            }
-            else if (invoice.PaidAmount > 0)
-            {
-                invoice.Status = InvoiceStatus.PartialPaid;
-            }
-            else
-            {
-                invoice.Status = InvoiceStatus.Confirmed;
-            }
+            invoice.Status = ResolveInvoiceStatus(invoice);
 
             // تحديث رصيد العميل (إعادة المبلغ)
             if (invoice.CustomerId.HasValue)
             {
-                var customer = await _context.Customers.FindAsync(invoice.CustomerId.Value);
+                var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId.Value && c.AccountId == accountId);
                 if (customer != null)
                 {
                     customer.Balance += paymentAmount;
@@ -639,7 +805,7 @@ namespace SmartAccountant.API.Controllers
             {
                 foreach (var item in invoice.Items)
                 {
-                    var product = await _context.Products.FindAsync(item.ProductId);
+                    var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId && p.AccountId == accountId);
                     if (product != null)
                     {
                         if (invoice.InvoiceType == InvoiceType.Sales)
@@ -652,7 +818,7 @@ namespace SmartAccountant.API.Controllers
                 // إعادة رصيد العميل
                 if (invoice.CustomerId.HasValue)
                 {
-                    var customer = await _context.Customers.FindAsync(invoice.CustomerId.Value);
+                    var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId.Value && c.AccountId == accountId);
                     if (customer != null)
                     {
                         customer.Balance -= (invoice.TotalAmount - invoice.PaidAmount);
@@ -690,12 +856,29 @@ namespace SmartAccountant.API.Controllers
                 return BadRequest("لا يمكن حذف فاتورة مؤكدة، يمكنك إلغاؤها فقط");
             }
 
-            // تسجيل النشاط
-            await _activityLog.LogAsync(accountId, GetUserId(), ActivityActions.DeleteInvoice, EntityTypes.Invoice,
-                invoice.Id, invoice.InvoiceNumber, $"تم حذف الفاتورة: {invoice.InvoiceNumber}");
+            // Legacy schemas may miss cascade constraints, so remove dependents explicitly.
+            var invoiceItems = await _context.InvoiceItems
+                .Where(ii => ii.InvoiceId == invoice.Id)
+                .ToListAsync();
+            if (invoiceItems.Count > 0)
+            {
+                _context.InvoiceItems.RemoveRange(invoiceItems);
+            }
+
+            var linkedPayments = await _context.Payments
+                .Where(p => p.InvoiceId == invoice.Id && p.AccountId == accountId)
+                .ToListAsync();
+            if (linkedPayments.Count > 0)
+            {
+                _context.Payments.RemoveRange(linkedPayments);
+            }
 
             _context.Invoices.Remove(invoice);
             await _context.SaveChangesAsync();
+
+            // تسجيل النشاط
+            await _activityLog.LogAsync(accountId, GetUserId(), ActivityActions.DeleteInvoice, EntityTypes.Invoice,
+                invoice.Id, invoice.InvoiceNumber, $"تم حذف الفاتورة: {invoice.InvoiceNumber}");
 
             return NoContent();
         }
@@ -740,6 +923,117 @@ namespace SmartAccountant.API.Controllers
                 TotalUnpaid = invoices.Sum(i => i.TotalAmount - i.PaidAmount),
                 DailySales = dailySales
             };
+        }
+
+        /// <summary>
+        /// الحصول على صورة QR Code للفاتورة
+        /// </summary>
+        [HttpGet("{id}/qrcode")]
+        public async Task<IActionResult> GetInvoiceQrCode(int id)
+        {
+            try
+            {
+                var accountId = GetAccountId();
+                var invoice = await _context.Invoices
+                    .FirstOrDefaultAsync(i => i.Id == id && i.AccountId == accountId);
+
+                if (invoice == null)
+                    return NotFound(new { message = "الفاتورة غير موجودة" });
+
+                var qrCodeService = new QrCodeService(HttpContext.RequestServices.GetRequiredService<IConfiguration>(),
+                    HttpContext.RequestServices.GetRequiredService<ILogger<QrCodeService>>());
+                var qrCodeImage = qrCodeService.GenerateInvoiceQrCode(id, invoice.InvoiceNumber);
+
+                return File(qrCodeImage, "image/png", $"invoice-{id}-qr.png");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "خطأ في إنشاء QR Code", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// الحصول على رابط QR Code (بدون الصورة)
+        /// </summary>
+        [HttpGet("{id}/qr-url")]
+        public async Task<IActionResult> GetInvoiceQrUrl(int id)
+        {
+            try
+            {
+                var accountId = GetAccountId();
+                var invoice = await _context.Invoices
+                    .FirstOrDefaultAsync(i => i.Id == id && i.AccountId == accountId);
+
+                if (invoice == null)
+                    return NotFound(new { message = "الفاتورة غير موجودة" });
+
+                var qrCodeService = new QrCodeService(HttpContext.RequestServices.GetRequiredService<IConfiguration>(),
+                    HttpContext.RequestServices.GetRequiredService<ILogger<QrCodeService>>());
+                var qrUrl = qrCodeService.GetQrUrl(id, invoice.InvoiceNumber);
+
+                return Ok(new { qrUrl, invoiceId = id, invoiceNumber = invoice.InvoiceNumber });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "خطأ في إنشاء رابط QR", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// التحقق من صحة الفاتورة عند مسح QR Code
+        /// </summary>
+        [HttpGet("{id}/verify")]
+        public async Task<IActionResult> VerifyInvoice(int id, [FromQuery] string @ref)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(@ref))
+                    return BadRequest(new { message = "رمز التحقق مفقود" });
+
+                var invoice = await _context.Invoices
+                    .Include(i => i.Customer)
+                    .Include(i => i.Account)
+                    .FirstOrDefaultAsync(i => i.Id == id);
+
+                if (invoice == null)
+                    return NotFound(new { message = "الفاتورة غير موجودة" });
+
+                var qrCodeService = new QrCodeService(HttpContext.RequestServices.GetRequiredService<IConfiguration>(),
+                    HttpContext.RequestServices.GetRequiredService<ILogger<QrCodeService>>());
+
+                if (!qrCodeService.VerifyHash(id, invoice.InvoiceNumber, @ref))
+                    return BadRequest(new { message = "فاتورة غير صحيحة أو منتهية الصلاحية" });
+
+                // تسجيل الوصول
+                await _activityLog.LogAsync(
+                    GetAccountId(),
+                    GetUserId(),
+                    "QR_SCAN",
+                    "Invoice",
+                    id,
+                    invoice.InvoiceNumber,
+                    $"تم مسح QR Code للفاتورة"
+                );
+
+                return Ok(new
+                {
+                    verified = true,
+                    invoiceId = id,
+                    invoiceNumber = invoice.InvoiceNumber,
+                    customerName = invoice.Customer?.Name,
+                    amount = invoice.TotalAmount,
+                    taxAmount = invoice.TaxAmount,
+                    finalAmount = invoice.TotalAmount + invoice.TaxAmount,
+                    createdDate = invoice.CreatedAt,
+                    status = invoice.Status.ToString(),
+                    paidAmount = invoice.PaidAmount,
+                    notes = invoice.Notes
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "خطأ في التحقق من الفاتورة", error = ex.Message });
+            }
         }
     }
 }

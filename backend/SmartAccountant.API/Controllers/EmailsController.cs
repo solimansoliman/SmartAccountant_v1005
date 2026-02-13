@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SmartAccountant.API.Data;
 using SmartAccountant.API.Models;
+using SmartAccountant.API.Services;
 
 namespace SmartAccountant.API.Controllers
 {
@@ -10,10 +11,23 @@ namespace SmartAccountant.API.Controllers
     public class EmailsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly ICustomerInputLimitsService _inputLimitsService;
 
-        public EmailsController(ApplicationDbContext context)
+        public EmailsController(ApplicationDbContext context, ICustomerInputLimitsService inputLimitsService)
         {
             _context = context;
+            _inputLimitsService = inputLimitsService;
+        }
+
+        private int GetAccountId()
+        {
+            if (Request.Headers.TryGetValue("X-Account-Id", out var accountIdHeader) &&
+                int.TryParse(accountIdHeader, out var accountId))
+            {
+                return accountId;
+            }
+
+            return 1;
         }
 
         /// <summary>
@@ -85,12 +99,26 @@ namespace SmartAccountant.API.Controllers
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] EmailCreateDto dto)
         {
+            var accountId = dto.AccountId > 0 ? dto.AccountId : GetAccountId();
+            var limits = await _inputLimitsService.GetLimitsAsync(accountId);
+            var emailAddress = (dto.EmailAddress ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(emailAddress))
+            {
+                return BadRequest(new { success = false, message = "عنوان البريد الإلكتروني مطلوب" });
+            }
+
+            if (emailAddress.Length > limits.CustomerEmailMaxLength)
+            {
+                return BadRequest(new { success = false, message = $"البريد الإلكتروني يتجاوز الحد المسموح ({limits.CustomerEmailMaxLength})" });
+            }
+
             var email = new Email
             {
-                AccountId = dto.AccountId,
+                AccountId = accountId,
                 EntityType = dto.EntityType,
                 EntityId = dto.EntityId,
-                EmailAddress = dto.EmailAddress,
+                EmailAddress = emailAddress,
                 EmailType = dto.EmailType ?? "work",
                 Label = dto.Label,
                 IsPrimary = dto.IsPrimary,
@@ -98,6 +126,7 @@ namespace SmartAccountant.API.Controllers
                 CanReceiveMarketing = dto.CanReceiveMarketing,
                 CanReceiveNotifications = dto.CanReceiveNotifications,
                 Notes = dto.Notes,
+                IsActive = true,
                 CreatedAt = DateTime.UtcNow,
                 CreatedByUserId = dto.CreatedByUserId
             };
@@ -130,7 +159,24 @@ namespace SmartAccountant.API.Controllers
             if (email == null)
                 return NotFound(new { success = false, message = "البريد الإلكتروني غير موجود" });
 
-            email.EmailAddress = dto.EmailAddress ?? email.EmailAddress;
+            if (dto.EmailAddress != null)
+            {
+                var limits = await _inputLimitsService.GetLimitsAsync(email.AccountId);
+                var emailAddress = dto.EmailAddress.Trim();
+
+                if (string.IsNullOrWhiteSpace(emailAddress))
+                {
+                    return BadRequest(new { success = false, message = "عنوان البريد الإلكتروني مطلوب" });
+                }
+
+                if (emailAddress.Length > limits.CustomerEmailMaxLength)
+                {
+                    return BadRequest(new { success = false, message = $"البريد الإلكتروني يتجاوز الحد المسموح ({limits.CustomerEmailMaxLength})" });
+                }
+
+                email.EmailAddress = emailAddress;
+            }
+
             email.EmailType = dto.EmailType ?? email.EmailType;
             email.Label = dto.Label ?? email.Label;
             email.IsPrimary = dto.IsPrimary ?? email.IsPrimary;

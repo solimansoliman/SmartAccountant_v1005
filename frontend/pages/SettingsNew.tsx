@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   Settings as SettingsIcon, Users, Shield, Key, Building2, Palette,
   Plus, Edit2, Trash2, Search, Check, X, Lock, Unlock, UserCheck, 
@@ -6,7 +6,7 @@ import {
   Mail, Phone, Briefcase, Clock, Globe, Moon, Sun, Loader2, AlertTriangle,
   Building, CreditCard, Calendar, MapPin, Download, Upload, Sparkles, Play,
   Database, Wrench, Server, Link, CheckCircle, XCircle, Grid3X3, List, Monitor, Image as ImageIcon,
-  LogIn, UserCog, ShieldCheck, Crown, FileText, Printer, Info, ToggleRight, ToggleLeft
+  LogIn, UserCog, ShieldCheck, Crown, FileText, Printer, Info, ToggleRight, ToggleLeft, User
 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
@@ -17,13 +17,129 @@ import {
   ApiUser, ApiRole, ApiAccount, ApiPlan,
   CreateUserDto, UpdateUserDto, CreateAccountDto, UpdateAccountDto 
 } from '../services/adminApi';
+import { notificationsApi } from '../services/apiService';
 import { getApiUrl, setApiUrl, testConnection } from '../services/configService';
 import { formatDateTime, formatDate } from '../services/dateService';
 import DateInput from '../components/DateInput';
+import CoordinateMapPicker from '../components/CoordinateMapPicker';
 import { notifyPermissionsChanged } from '../services/permissionsHooks';
+import syncService, { SyncQueueItem } from '../services/syncService';
+import {
+  BrandIdentity,
+  BrandIdentityAssignment,
+  BrandAssignmentMode,
+  getBrandIdentities,
+  getBrandAssignments,
+  createBrandIdentity,
+  upsertBrandIdentity,
+  deleteBrandIdentity,
+  createBrandAssignment,
+  upsertBrandAssignment,
+  deleteBrandAssignment,
+  getEffectiveBrandIdentity,
+} from '../services/brandIdentityService';
+import {
+  buildMapUrl,
+  composeAddressWithCoordinates,
+  parseAddressCoordinates,
+  removeCoordinateTokenFromAddress,
+  validateCoordinateInputs,
+} from '../services/geoAddressService';
 
 // ==================== Types ====================
 type TabType = 'general' | 'accounts' | 'users' | 'roles' | 'plans' | 'server' | 'logs' | 'permissions' | 'tools';
+
+interface SettingsSearchResult {
+  keyword: string;
+  keywords: string[];
+  tab: TabType;
+  path: string;
+  icon: string;
+  selector?: string;
+  settingKey?: string;
+  accountId?: number;
+  userId?: number;
+  roleId?: number;
+  planId?: number;
+  logId?: number;
+  permissionCategory?: 'pages' | 'menu' | 'tabs' | 'actions' | 'features';
+}
+
+interface PendingSearchNavigation {
+  tab: TabType;
+  keyword: string;
+  selector?: string;
+}
+
+interface SearchableSettingItem {
+  keyword: string;
+  keywords: string[];
+  tab: TabType;
+  path: string;
+  icon: string;
+  settingKey?: string;
+}
+
+type RegisterLimitSettingKey =
+  | 'registerUsernameMaxLength'
+  | 'registerFullNameMaxLength'
+  | 'registerCompanyNameMaxLength'
+  | 'registerEmailMaxLength'
+  | 'registerPasswordMaxLength';
+
+interface RegisterLimitSettingConfig {
+  min: number;
+  max: number;
+  fallback: number;
+  label: string;
+  description: string;
+}
+
+const REGISTER_LIMIT_SETTING_CONFIG: Record<RegisterLimitSettingKey, RegisterLimitSettingConfig> = {
+  registerUsernameMaxLength: {
+    min: 12,
+    max: 80,
+    fallback: 50,
+    label: 'حد اسم المستخدم',
+    description: 'الحد الأقصى لاسم المستخدم في التسجيل',
+  },
+  registerFullNameMaxLength: {
+    min: 30,
+    max: 150,
+    fallback: 100,
+    label: 'حد الاسم الشخصي',
+    description: 'الحد الأقصى للاسم الشخصي في التسجيل',
+  },
+  registerCompanyNameMaxLength: {
+    min: 30,
+    max: 180,
+    fallback: 120,
+    label: 'حد اسم الشركة',
+    description: 'الحد الأقصى لاسم الشركة في التسجيل',
+  },
+  registerEmailMaxLength: {
+    min: 40,
+    max: 200,
+    fallback: 100,
+    label: 'حد البريد الإلكتروني',
+    description: 'الحد الأقصى للبريد الإلكتروني في التسجيل',
+  },
+  registerPasswordMaxLength: {
+    min: 20,
+    max: 128,
+    fallback: 64,
+    label: 'حد كلمة المرور',
+    description: 'الحد الأقصى لكلمة المرور في التسجيل',
+  },
+};
+
+const REGISTER_LIMIT_SETTING_KEYS: RegisterLimitSettingKey[] = [
+  'registerUsernameMaxLength',
+  'registerFullNameMaxLength',
+  'registerCompanyNameMaxLength',
+  'registerEmailMaxLength',
+  'registerPasswordMaxLength',
+];
 
 // ==================== System Modules Definition ====================
 const SYSTEM_MODULES = [
@@ -114,6 +230,8 @@ interface AccountFormData {
   email: string;
   phone: string;
   address: string;
+  latitude: string;
+  longitude: string;
   currencySymbol: string;
   taxNumber: string;
   logoUrl: string;
@@ -124,15 +242,29 @@ interface AccountFormData {
 
 // ==================== Main Component ====================
 const Settings: React.FC = () => {
-  const { notify } = useNotification();
+  const { notify, refreshNotifications } = useNotification();
   const { user } = useAuth();
   const { isDarkMode, toggleDarkMode, currency, setCurrency, availableCurrencies, addCurrency, permissions, togglePermission, defaultViewMode, setDefaultViewMode, dateFormat, setDateFormat, timeFormat, setTimeFormat, dateDisplayStyle, setDateDisplayStyle } = useSettings();
+  const { syncState, isOnline, forceSync } = useSync();
   
   const [activeTab, setActiveTab] = useState<TabType>('general');
   const [loading, setLoading] = useState(false);
   
   // Settings Search
   const [settingsSearch, setSettingsSearch] = useState('');
+  const settingsContentRef = useRef<HTMLDivElement | null>(null);
+  const [pendingSearchNavigation, setPendingSearchNavigation] = useState<PendingSearchNavigation | null>(null);
+  const [componentSearchResults, setComponentSearchResults] = useState<SettingsSearchResult[]>([]);
+  const [queueItems, setQueueItems] = useState<SyncQueueItem[]>([]);
+  const [queueActionLoading, setQueueActionLoading] = useState<string | null>(null);
+  const [registerLimitDrafts, setRegisterLimitDrafts] = useState<Record<RegisterLimitSettingKey, string>>({
+    registerUsernameMaxLength: String(REGISTER_LIMIT_SETTING_CONFIG.registerUsernameMaxLength.fallback),
+    registerFullNameMaxLength: String(REGISTER_LIMIT_SETTING_CONFIG.registerFullNameMaxLength.fallback),
+    registerCompanyNameMaxLength: String(REGISTER_LIMIT_SETTING_CONFIG.registerCompanyNameMaxLength.fallback),
+    registerEmailMaxLength: String(REGISTER_LIMIT_SETTING_CONFIG.registerEmailMaxLength.fallback),
+    registerPasswordMaxLength: String(REGISTER_LIMIT_SETTING_CONFIG.registerPasswordMaxLength.fallback),
+  });
+  const [isSavingRegisterLimits, setIsSavingRegisterLimits] = useState(false);
 
   // Accounts State
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
@@ -145,12 +277,15 @@ const Settings: React.FC = () => {
   const [expandedAccountIds, setExpandedAccountIds] = useState<number[]>([]); // الحسابات الموسعة
   const [accountUsersMap, setAccountUsersMap] = useState<Record<number, ApiUser[]>>({}); // مستخدمي كل حساب
   const [accountUsersLoading, setAccountUsersLoading] = useState<Record<number, boolean>>({}); // حالة التحميل
+  const [detectingAccountLocation, setDetectingAccountLocation] = useState(false);
   const [accountFormData, setAccountFormData] = useState<AccountFormData>({
     name: '',
     nameEn: '',
     email: '',
     phone: '',
     address: '',
+    latitude: '',
+    longitude: '',
     currencySymbol: 'ج.م',
     taxNumber: '',
     logoUrl: '',
@@ -183,11 +318,12 @@ const Settings: React.FC = () => {
   });
   const [newPassword, setNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [selectedAccountForUser, setSelectedAccountForUser] = useState<number>(1);
+  const [selectedAccountForUser, setSelectedAccountForUser] = useState<number>(Number(user?.accountId) || 1);
 
   // Roles State
   const [roles, setRoles] = useState<ApiRole[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
+  const [creatingDefaultRole, setCreatingDefaultRole] = useState(false);
   const [roleSearch, setRoleSearch] = useState(''); // فلتر البحث في الأدوار
   const [selectedRole, setSelectedRole] = useState<ApiRole | null>(null);
   const [showRoleModal, setShowRoleModal] = useState(false);
@@ -197,6 +333,28 @@ const Settings: React.FC = () => {
     color: '#3B82F6',
     description: '',
   });
+  const defaultLimitedRoleId = useMemo(() => {
+    const preferredRole = roles.find(
+      role => role.name === 'NewAcount' || role.nameEn?.toLowerCase() === 'newacount'
+    );
+    if (preferredRole) {
+      return preferredRole.id;
+    }
+
+    // توافق مع الحسابات القديمة التي ما زالت تستخدم اسم Staff/موظف.
+    return roles.find(role => role.name === 'موظف' || role.nameEn?.toLowerCase() === 'staff')?.id;
+  }, [roles]);
+
+  const findDefaultLimitedRoleId = useCallback((sourceRoles: ApiRole[]): number | undefined => {
+    const preferredRole = sourceRoles.find(
+      role => role.name === 'NewAcount' || role.nameEn?.toLowerCase() === 'newacount'
+    );
+    if (preferredRole) {
+      return preferredRole.id;
+    }
+
+    return sourceRoles.find(role => role.name === 'موظف' || role.nameEn?.toLowerCase() === 'staff')?.id;
+  }, []);
 
   // Plans State
   const [plans, setPlans] = useState<ApiPlan[]>([]);
@@ -205,6 +363,8 @@ const Settings: React.FC = () => {
   const [selectedPlan, setSelectedPlan] = useState<ApiPlan | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<ApiPlan | null>(null);
+  // Track which plan is showing the permissions panel
+  const [expandedPlanPermsId, setExpandedPlanPermsId] = useState<number | null>(null);
   const [planFormData, setPlanFormData] = useState({
     name: '',
     nameEn: '',
@@ -230,8 +390,97 @@ const Settings: React.FC = () => {
     hasCustomInvoices: false,
     hasMultiCurrency: false,
     hasApiAccess: false,
+    hasOfflineMode: false,
     hasWhiteLabel: false,
   });
+
+  useEffect(() => {
+    const refreshQueueItems = () => {
+      const items = syncService
+        .getQueueItems()
+        .sort((a, b) => b.timestamp - a.timestamp);
+      setQueueItems(items);
+    };
+
+    refreshQueueItems();
+    const unsubscribe = syncService.subscribe(() => refreshQueueItems());
+    const interval = setInterval(refreshQueueItems, 5000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
+  }, []);
+
+  const runQueueAction = async (actionKey: string, action: () => Promise<void> | void) => {
+    try {
+      setQueueActionLoading(actionKey);
+      await action();
+      const items = syncService
+        .getQueueItems()
+        .sort((a, b) => b.timestamp - a.timestamp);
+      setQueueItems(items);
+    } finally {
+      setQueueActionLoading(null);
+    }
+  };
+
+  const handleForceSyncNow = async () => {
+    await runQueueAction('force-sync', async () => {
+      try {
+        await forceSync();
+        notify('تم بدء المزامنة الآن', 'success');
+      } catch (error: any) {
+        notify(error?.message || 'تعذر بدء المزامنة', 'error');
+      }
+    });
+  };
+
+  const handleRetryFailed = async () => {
+    await runQueueAction('retry-failed', () => {
+      const retried = syncService.retryFailedItems();
+      notify(retried > 0 ? `تمت إعادة جدولة ${retried} عنصر للمزامنة` : 'لا توجد عناصر فاشلة لإعادة المحاولة', retried > 0 ? 'success' : 'info');
+    });
+  };
+
+  const handleDiscardConflicts = async () => {
+    await runQueueAction('discard-conflicts', () => {
+      const discarded = syncService.discardConflictItems();
+      notify(discarded > 0 ? `تم حذف ${discarded} عنصر متعارض من الطابور` : 'لا توجد عناصر متعارضة', discarded > 0 ? 'success' : 'info');
+    });
+  };
+
+  const handleRetryItem = async (itemId: string) => {
+    await runQueueAction(`retry-${itemId}`, () => {
+      const ok = syncService.retryItem(itemId);
+      notify(ok ? 'تمت إعادة جدولة العنصر للمزامنة' : 'العنصر غير موجود', ok ? 'success' : 'error');
+    });
+  };
+
+  const handleDiscardItem = async (itemId: string) => {
+    await runQueueAction(`discard-${itemId}`, () => {
+      const ok = syncService.discardItem(itemId);
+      notify(ok ? 'تم حذف العنصر من الطابور' : 'العنصر غير موجود', ok ? 'success' : 'error');
+    });
+  };
+
+  const updateOfflineSetting = async (
+    key: 'allowOfflineMode' | 'allowOfflineCreate' | 'allowOfflineEdit' | 'allowOfflineDelete' | 'showOfflineIndicator' | 'autoSyncOnReconnect' | 'maxPendingChanges' | 'offlineDataRetentionDays' | 'syncIntervalSeconds',
+    value: boolean | number,
+    type: 'bool' | 'int'
+  ) => {
+    if (!canManageOfflineSettings) {
+      notify('ليس لديك صلاحية إدارة إعدادات العمل بدون اتصال', 'error');
+      return;
+    }
+
+    try {
+      await systemSettingsApi.update(key, String(value), type);
+      togglePermission(key as any, value);
+    } catch (error: any) {
+      notify(error?.message || 'تعذر حفظ إعدادات العمل بدون اتصال', 'error');
+    }
+  };
 
   // Currency State
   const [newCurrency, setNewCurrency] = useState('');
@@ -257,7 +506,7 @@ const Settings: React.FC = () => {
   const [logsSearch, setLogsSearch] = useState(''); // فلتر البحث النصي في السجلات
 
   // Permissions Matrix State
-  const [permissionsMatrix, setPermissionsMatrix] = useState<Record<string, Record<string, { view: boolean; create: boolean; edit: boolean; delete: boolean }>>>({});
+  const [permissionsMatrix, setPermissionsMatrix] = useState<Record<string, Record<string, { view: boolean; create: boolean; edit: boolean; delete: boolean; print: boolean }>>>({});
   const [selectedPermRole, setSelectedPermRole] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [permEntityType, setPermEntityType] = useState<'roles' | 'users' | 'accounts'>('roles');
@@ -278,8 +527,197 @@ const Settings: React.FC = () => {
   const [serverLatency, setServerLatency] = useState<number | null>(null);
   const [isSavingServer, setIsSavingServer] = useState(false);
 
+  // Brand Identity State
+  const [brandIdentities, setBrandIdentities] = useState<BrandIdentity[]>([]);
+  const [brandAssignments, setBrandAssignments] = useState<BrandIdentityAssignment[]>([]);
+  const [editingIdentityId, setEditingIdentityId] = useState<string | null>(null);
+  const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
+  const [activeBrandIdentity, setActiveBrandIdentity] = useState<BrandIdentity | null>(null);
+  const [identityFormData, setIdentityFormData] = useState({
+    name: '',
+    description: '',
+    primary: '#2563eb',
+    secondary: '#64748b',
+    success: '#16a34a',
+    danger: '#dc2626',
+    warning: '#ca8a04',
+  });
+  const [assignmentFormData, setAssignmentFormData] = useState({
+    identityId: '',
+    mode: 'global' as BrandAssignmentMode,
+    accountId: '',
+    startAt: '',
+    endAt: '',
+    priority: 0,
+    enabled: true,
+    notes: '',
+  });
+  const [assignmentSearch, setAssignmentSearch] = useState('');
+  const [assignmentFilterMode, setAssignmentFilterMode] = useState<'all' | BrandAssignmentMode>('all');
+  const [assignmentFilterStatus, setAssignmentFilterStatus] = useState<'all' | 'enabled' | 'disabled'>('all');
+  const [assignmentFilterAccountId, setAssignmentFilterAccountId] = useState<'all' | string>('all');
+
   // Check admin status
   const isAdmin = user?.role === 'sys_admin' || user?.isSuperAdmin === true;
+  const canManageOfflineSettings = isAdmin || user?.permissions?.canManageSettings === true;
+  const offlineAllowedByPlan = (permissions as any).allowOfflineByPlan !== false;
+  const offlineEnabledByAdmin = (permissions as any).allowOfflineMode !== false;
+  const offlineEffectiveEnabled = offlineAllowedByPlan && offlineEnabledByAdmin;
+
+  const clampRegisterLimitValue = useCallback((settingKey: RegisterLimitSettingKey, rawValue: string | number): number => {
+    const config = REGISTER_LIMIT_SETTING_CONFIG[settingKey];
+    const parsed = typeof rawValue === 'number' ? rawValue : parseInt(String(rawValue), 10);
+    if (!Number.isFinite(parsed)) {
+      return config.fallback;
+    }
+    return Math.min(config.max, Math.max(config.min, Math.floor(parsed)));
+  }, []);
+
+  const persistRegisterLimit = useCallback(
+    async (settingKey: RegisterLimitSettingKey, value: number, showToast: boolean = true) => {
+      const config = REGISTER_LIMIT_SETTING_CONFIG[settingKey];
+
+      try {
+        await systemSettingsApi.update(settingKey, value.toString(), 'int', config.description, true);
+        togglePermission(settingKey as any, value);
+        if (showToast) {
+          notify(`تم تحديث ${config.label} ✓`, 'success');
+        }
+      } catch {
+        togglePermission(settingKey as any, value);
+        if (showToast) {
+          notify(`تم تحديث ${config.label} (محلياً)`, 'info');
+        }
+      }
+    },
+    [notify, togglePermission]
+  );
+
+  const setRegisterLimitDraft = useCallback((settingKey: RegisterLimitSettingKey, rawValue: string) => {
+    const digitsOnly = rawValue.replace(/[^\d]/g, '');
+    setRegisterLimitDrafts(prev => ({ ...prev, [settingKey]: digitsOnly }));
+  }, []);
+
+  const normalizeRegisterLimitDraft = useCallback(
+    (settingKey: RegisterLimitSettingKey) => {
+      const nextValue = clampRegisterLimitValue(settingKey, registerLimitDrafts[settingKey]);
+      setRegisterLimitDrafts(prev => ({ ...prev, [settingKey]: String(nextValue) }));
+    },
+    [clampRegisterLimitValue, registerLimitDrafts]
+  );
+
+  const stepRegisterLimitDraft = useCallback(
+    (settingKey: RegisterLimitSettingKey, delta: number) => {
+      const current = clampRegisterLimitValue(settingKey, registerLimitDrafts[settingKey]);
+      const config = REGISTER_LIMIT_SETTING_CONFIG[settingKey];
+      const nextValue = Math.min(config.max, Math.max(config.min, current + delta));
+
+      setRegisterLimitDrafts(prev => ({ ...prev, [settingKey]: String(nextValue) }));
+    },
+    [clampRegisterLimitValue, registerLimitDrafts]
+  );
+
+  const hasPendingRegisterLimitChanges = useMemo(
+    () =>
+      REGISTER_LIMIT_SETTING_KEYS.some(
+        (settingKey) =>
+          clampRegisterLimitValue(settingKey, registerLimitDrafts[settingKey]) !==
+          clampRegisterLimitValue(settingKey, (permissions as any)[settingKey])
+      ),
+    [
+      clampRegisterLimitValue,
+      registerLimitDrafts,
+      (permissions as any).registerUsernameMaxLength,
+      (permissions as any).registerFullNameMaxLength,
+      (permissions as any).registerCompanyNameMaxLength,
+      (permissions as any).registerEmailMaxLength,
+      (permissions as any).registerPasswordMaxLength,
+    ]
+  );
+
+  const saveAllRegisterLimits = useCallback(async () => {
+    if (isSavingRegisterLimits) {
+      return;
+    }
+
+    if (!hasPendingRegisterLimitChanges) {
+      notify('لا توجد تغييرات جديدة في حدود الحروف', 'info');
+      return;
+    }
+
+    setIsSavingRegisterLimits(true);
+
+    const normalizedValues = REGISTER_LIMIT_SETTING_KEYS.reduce((acc, settingKey) => {
+      const boundedValue = clampRegisterLimitValue(settingKey, registerLimitDrafts[settingKey]);
+      acc[settingKey] = boundedValue;
+      return acc;
+    }, {} as Record<RegisterLimitSettingKey, number>);
+
+    setRegisterLimitDrafts({
+      registerUsernameMaxLength: String(normalizedValues.registerUsernameMaxLength),
+      registerFullNameMaxLength: String(normalizedValues.registerFullNameMaxLength),
+      registerCompanyNameMaxLength: String(normalizedValues.registerCompanyNameMaxLength),
+      registerEmailMaxLength: String(normalizedValues.registerEmailMaxLength),
+      registerPasswordMaxLength: String(normalizedValues.registerPasswordMaxLength),
+    });
+
+    const results = await Promise.all(
+      REGISTER_LIMIT_SETTING_KEYS.map(async (settingKey) => {
+        try {
+          await systemSettingsApi.update(
+            settingKey,
+            normalizedValues[settingKey].toString(),
+            'int',
+            REGISTER_LIMIT_SETTING_CONFIG[settingKey].description,
+            true
+          );
+          togglePermission(settingKey as any, normalizedValues[settingKey]);
+          return true;
+        } catch {
+          togglePermission(settingKey as any, normalizedValues[settingKey]);
+          return false;
+        }
+      })
+    );
+
+    const successCount = results.filter(Boolean).length;
+    if (successCount === REGISTER_LIMIT_SETTING_KEYS.length) {
+      notify('تم حفظ جميع حدود الحروف بنجاح ✓', 'success');
+    } else if (successCount > 0) {
+      notify('تم حفظ جزء من التغييرات على السيرفر، وتم تطبيق الباقي محلياً', 'warning');
+    } else {
+      notify('تم تطبيق حدود الحروف محلياً (تعذر الحفظ على السيرفر حالياً)', 'info');
+    }
+
+    setIsSavingRegisterLimits(false);
+  }, [
+    clampRegisterLimitValue,
+    hasPendingRegisterLimitChanges,
+    isSavingRegisterLimits,
+    notify,
+    registerLimitDrafts,
+    togglePermission,
+  ]);
+
+  useEffect(() => {
+    const syncDraft = (settingKey: RegisterLimitSettingKey) =>
+      String(clampRegisterLimitValue(settingKey, (permissions as any)[settingKey]));
+
+    setRegisterLimitDrafts({
+      registerUsernameMaxLength: syncDraft('registerUsernameMaxLength'),
+      registerFullNameMaxLength: syncDraft('registerFullNameMaxLength'),
+      registerCompanyNameMaxLength: syncDraft('registerCompanyNameMaxLength'),
+      registerEmailMaxLength: syncDraft('registerEmailMaxLength'),
+      registerPasswordMaxLength: syncDraft('registerPasswordMaxLength'),
+    });
+  }, [
+    clampRegisterLimitValue,
+    (permissions as any).registerUsernameMaxLength,
+    (permissions as any).registerFullNameMaxLength,
+    (permissions as any).registerCompanyNameMaxLength,
+    (permissions as any).registerEmailMaxLength,
+    (permissions as any).registerPasswordMaxLength,
+  ]);
 
   // Confirmation Modal
   const [confirmModal, setConfirmModal] = useState<{
@@ -294,6 +732,7 @@ const Settings: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'general') {
       loadAccounts(); // تحميل الحسابات للحصول على بيانات الحساب الحالي
+      loadBrandIdentityData();
     } else if (activeTab === 'accounts') {
       loadAccounts();
     } else if (activeTab === 'users') {
@@ -342,6 +781,82 @@ const Settings: React.FC = () => {
     }
   }, [logsPage]);
 
+  useEffect(() => {
+    if (!pendingSearchNavigation || pendingSearchNavigation.tab !== activeTab) {
+      return;
+    }
+
+    const highlightClasses = [
+      'ring-4',
+      'ring-sky-500',
+      'ring-offset-4',
+      'rounded-md',
+      'shadow-2xl',
+      'shadow-sky-500/30',
+      'transition-all',
+      'duration-300',
+    ];
+
+    let highlightedElement: HTMLElement | null = null;
+    let highlightResetTimer: number | null = null;
+
+    const timer = window.setTimeout(() => {
+      const container = settingsContentRef.current;
+      if (!container) {
+        setPendingSearchNavigation(null);
+        return;
+      }
+
+      const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
+      const target = normalize(pendingSearchNavigation.keyword);
+
+      const matchedBySelector = pendingSearchNavigation.selector
+        ? container.querySelector<HTMLElement>(pendingSearchNavigation.selector)
+        : null;
+
+      const candidates = Array.from(
+        container.querySelectorAll<HTMLElement>('h1, h2, h3, h4, label, th, td, button, p, span, div')
+      );
+
+      const matchedByText = candidates.find((element) => {
+        const text = normalize(element.textContent || '');
+        return text.length > 0 && text.includes(target);
+      });
+
+      const matchedElement = matchedBySelector || matchedByText;
+
+      const focusElement = matchedElement || container;
+      focusElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      if (matchedElement) {
+        highlightedElement = matchedElement;
+        highlightedElement.classList.add(...highlightClasses);
+
+        // إزاحة بسيطة للأعلى لعرض العنصر بشكل أوضح بعد الانتقال.
+        window.setTimeout(() => {
+          window.scrollBy({ top: -90, behavior: 'smooth' });
+        }, 220);
+
+        highlightResetTimer = window.setTimeout(() => {
+          highlightedElement?.classList.remove(...highlightClasses);
+          highlightedElement = null;
+        }, 2600);
+      }
+
+      setPendingSearchNavigation(null);
+    }, 140);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (highlightResetTimer) {
+        window.clearTimeout(highlightResetTimer);
+      }
+      if (highlightedElement) {
+        highlightedElement.classList.remove(...highlightClasses);
+      }
+    };
+  }, [activeTab, pendingSearchNavigation]);
+
   // ==================== Server Connection Functions ====================
   const checkServerConnection = async () => {
     setServerConnectionStatus('checking');
@@ -381,6 +896,234 @@ const Settings: React.FC = () => {
     } finally {
       setIsSavingServer(false);
     }
+  };
+
+  // ==================== Brand Identity Functions ====================
+  const isValidHexColor = (value: string): boolean => /^#[0-9A-Fa-f]{6}$/.test(value);
+
+  const toLocalDateTimeValue = (iso?: string): string => {
+    if (!iso) return '';
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const offsetMs = parsed.getTimezoneOffset() * 60000;
+    return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 16);
+  };
+
+  const getModeLabel = (mode: BrandAssignmentMode): string => {
+    switch (mode) {
+      case 'global':
+        return 'عام';
+      case 'account':
+        return 'حسب الحساب';
+      case 'time':
+        return 'حسب الفترة';
+      case 'account_time':
+        return 'حسب الحساب والفترة';
+      default:
+        return mode;
+    }
+  };
+
+  const resetIdentityForm = () => {
+    setEditingIdentityId(null);
+    setIdentityFormData({
+      name: '',
+      description: '',
+      primary: '#2563eb',
+      secondary: '#64748b',
+      success: '#16a34a',
+      danger: '#dc2626',
+      warning: '#ca8a04',
+    });
+  };
+
+  const resetAssignmentForm = () => {
+    setEditingAssignmentId(null);
+    setAssignmentFormData(prev => ({
+      identityId: brandIdentities[0]?.id || prev.identityId || '',
+      mode: 'global',
+      accountId: '',
+      startAt: '',
+      endAt: '',
+      priority: 0,
+      enabled: true,
+      notes: '',
+    }));
+  };
+
+  const loadBrandIdentityData = () => {
+    const identities = getBrandIdentities();
+    const assignments = getBrandAssignments().sort((a, b) => (b.priority || 0) - (a.priority || 0));
+    setBrandIdentities(identities);
+    setBrandAssignments(assignments);
+    setActiveBrandIdentity(getEffectiveBrandIdentity());
+
+    setAssignmentFormData(prev => ({
+      ...prev,
+      identityId: prev.identityId || identities[0]?.id || '',
+    }));
+  };
+
+  const handleSaveIdentity = () => {
+    const name = identityFormData.name.trim();
+    if (!name) {
+      notify('يرجى إدخال اسم الهوية', 'error');
+      return;
+    }
+
+    const colorFields = [
+      identityFormData.primary,
+      identityFormData.secondary,
+      identityFormData.success,
+      identityFormData.danger,
+      identityFormData.warning,
+    ];
+    if (!colorFields.every(isValidHexColor)) {
+      notify('يرجى إدخال ألوان بصيغة Hex صحيحة مثل #2563eb', 'error');
+      return;
+    }
+
+    if (editingIdentityId) {
+      const existing = brandIdentities.find(item => item.id === editingIdentityId);
+      upsertBrandIdentity({
+        id: editingIdentityId,
+        name,
+        description: identityFormData.description.trim() || undefined,
+        palette: {
+          primary: identityFormData.primary,
+          secondary: identityFormData.secondary,
+          success: identityFormData.success,
+          danger: identityFormData.danger,
+          warning: identityFormData.warning,
+        },
+        isBuiltIn: existing?.isBuiltIn,
+      });
+      notify('تم تحديث الهوية اللونية بنجاح', 'success');
+    } else {
+      createBrandIdentity({
+        name,
+        description: identityFormData.description.trim() || undefined,
+        palette: {
+          primary: identityFormData.primary,
+          secondary: identityFormData.secondary,
+          success: identityFormData.success,
+          danger: identityFormData.danger,
+          warning: identityFormData.warning,
+        },
+      });
+      notify('تم إنشاء هوية لونية جديدة', 'success');
+    }
+
+    resetIdentityForm();
+    loadBrandIdentityData();
+  };
+
+  const handleEditIdentity = (identity: BrandIdentity) => {
+    setEditingIdentityId(identity.id);
+    setIdentityFormData({
+      name: identity.name,
+      description: identity.description || '',
+      primary: identity.palette.primary,
+      secondary: identity.palette.secondary,
+      success: identity.palette.success,
+      danger: identity.palette.danger,
+      warning: identity.palette.warning,
+    });
+  };
+
+  const handleDeleteIdentity = (identity: BrandIdentity) => {
+    if (identity.isBuiltIn) {
+      notify('لا يمكن حذف الهوية الافتراضية المدمجة', 'warning');
+      return;
+    }
+
+    const deleted = deleteBrandIdentity(identity.id);
+    if (!deleted) {
+      notify('تعذر حذف الهوية: قد تكون مستخدمة في تخصيص نشط', 'error');
+      return;
+    }
+
+    notify('تم حذف الهوية اللونية', 'success');
+    if (editingIdentityId === identity.id) {
+      resetIdentityForm();
+    }
+    loadBrandIdentityData();
+  };
+
+  const handleSaveAssignment = () => {
+    if (!assignmentFormData.identityId) {
+      notify('يرجى اختيار الهوية اللونية أولاً', 'error');
+      return;
+    }
+
+    const mode = assignmentFormData.mode;
+    const needsAccount = mode === 'account' || mode === 'account_time';
+    const needsTime = mode === 'time' || mode === 'account_time';
+
+    if (needsAccount && !assignmentFormData.accountId) {
+      notify('يرجى اختيار الحساب لهذا التخصيص', 'error');
+      return;
+    }
+
+    if (needsTime && (!assignmentFormData.startAt || !assignmentFormData.endAt)) {
+      notify('يرجى تحديد بداية ونهاية الفترة الزمنية', 'error');
+      return;
+    }
+
+    const startIso = needsTime ? new Date(assignmentFormData.startAt).toISOString() : undefined;
+    const endIso = needsTime ? new Date(assignmentFormData.endAt).toISOString() : undefined;
+    if (startIso && endIso && new Date(startIso) > new Date(endIso)) {
+      notify('تاريخ البداية يجب أن يكون قبل تاريخ النهاية', 'error');
+      return;
+    }
+
+    const basePayload = {
+      identityId: assignmentFormData.identityId,
+      mode,
+      accountId: needsAccount ? Number(assignmentFormData.accountId) : undefined,
+      startAt: startIso,
+      endAt: endIso,
+      priority: Number(assignmentFormData.priority) || 0,
+      enabled: assignmentFormData.enabled,
+      notes: assignmentFormData.notes.trim() || undefined,
+    };
+
+    if (editingAssignmentId) {
+      upsertBrandAssignment({
+        id: editingAssignmentId,
+        ...basePayload,
+      });
+      notify('تم تحديث التخصيص بنجاح', 'success');
+    } else {
+      createBrandAssignment(basePayload);
+      notify('تم إضافة التخصيص بنجاح', 'success');
+    }
+
+    resetAssignmentForm();
+    loadBrandIdentityData();
+  };
+
+  const handleEditAssignment = (assignment: BrandIdentityAssignment) => {
+    setEditingAssignmentId(assignment.id);
+    setAssignmentFormData({
+      identityId: assignment.identityId,
+      mode: assignment.mode,
+      accountId: assignment.accountId ? String(assignment.accountId) : '',
+      startAt: toLocalDateTimeValue(assignment.startAt),
+      endAt: toLocalDateTimeValue(assignment.endAt),
+      priority: assignment.priority || 0,
+      enabled: assignment.enabled !== false,
+      notes: assignment.notes || '',
+    });
+  };
+
+  const handleDeleteAssignment = (assignmentId: string) => {
+    deleteBrandAssignment(assignmentId);
+    notify('تم حذف التخصيص', 'success');
+    if (editingAssignmentId === assignmentId) {
+      resetAssignmentForm();
+    }
+    loadBrandIdentityData();
   };
 
   // ==================== API Calls ====================
@@ -479,10 +1222,12 @@ const Settings: React.FC = () => {
     }
   }, [user?.accountId, user?.role, user?.isSuperAdmin, notify]);
 
-  const loadRoles = useCallback(async () => {
+  const loadRoles = useCallback(async (accountIdOverride?: number) => {
     setRolesLoading(true);
     try {
-      const data = await rolesApi.getAll(user?.accountId || 1);
+      const fallbackAccountId = Number(user?.accountId) || 1;
+      const targetAccountId = accountIdOverride || fallbackAccountId;
+      const data = await rolesApi.getAll(targetAccountId);
       setRoles(data);
     } catch (error: any) {
       notify(error.message || 'فشل في تحميل الأدوار', 'error');
@@ -510,10 +1255,26 @@ const Settings: React.FC = () => {
       return;
     }
 
+    const targetAccountId = Number(selectedAccountForUser || user?.accountId || 1);
+    if (!Number.isFinite(targetAccountId) || targetAccountId <= 0) {
+      notify('يرجى اختيار حساب صالح للمستخدم', 'warning');
+      return;
+    }
+
+    const validRoleIdsForAccount = userFormData.roleIds.filter(roleId => roles.some(role => role.id === roleId));
+    if (validRoleIdsForAccount.length !== userFormData.roleIds.length) {
+      setUserFormData(prev => ({ ...prev, roleIds: validRoleIdsForAccount }));
+    }
+
+    if (!userFormData.isSuperAdmin && roles.length > 0 && validRoleIdsForAccount.length === 0) {
+      notify('يجب اختيار دور واحد على الأقل للمستخدم', 'warning');
+      return;
+    }
+
     setLoading(true);
     try {
       const dto: CreateUserDto = {
-        accountId: selectedAccountForUser || user?.accountId || 1,
+        accountId: targetAccountId,
         username: userFormData.username,
         password: userFormData.password,
         fullName: userFormData.fullName,
@@ -521,8 +1282,8 @@ const Settings: React.FC = () => {
         phone: userFormData.phone || undefined,
         jobTitle: userFormData.jobTitle || undefined,
         department: userFormData.department || undefined,
-        isSuperAdmin: userFormData.isSuperAdmin,
-        roleIds: userFormData.roleIds,
+        isSuperAdmin: isAdmin && userFormData.isSuperAdmin,
+        roleIds: validRoleIdsForAccount,
         assignedByUserId: parseInt(user?.id || '1'),
       };
 
@@ -544,6 +1305,11 @@ const Settings: React.FC = () => {
   const handleUpdateUser = async () => {
     if (!editingUser) return;
 
+    if (!userFormData.isSuperAdmin && userFormData.roleIds.length === 0) {
+      notify('يجب اختيار دور واحد على الأقل للمستخدم', 'warning');
+      return;
+    }
+
     setLoading(true);
     try {
       const dto: UpdateUserDto = {
@@ -552,7 +1318,7 @@ const Settings: React.FC = () => {
         phone: userFormData.phone || undefined,
         jobTitle: userFormData.jobTitle || undefined,
         department: userFormData.department || undefined,
-        isSuperAdmin: userFormData.isSuperAdmin,
+        isSuperAdmin: isAdmin && userFormData.isSuperAdmin,
       };
 
       const updatedUser = await usersApi.update(editingUser.id, dto);
@@ -703,41 +1469,184 @@ const Settings: React.FC = () => {
       jobTitle: '',
       department: '',
       isSuperAdmin: false,
-      roleIds: [],
+      roleIds: defaultLimitedRoleId ? [defaultLimitedRoleId] : [],
       accountId: user?.accountId ? parseInt(user.accountId.toString()) : 1,
     });
     setSelectedAccountForUser(user?.accountId ? parseInt(user.accountId.toString()) : 1);
     setEditingUser(null);
   };
 
-  // ==================== Account Handlers ====================
-  const handleCreateAccount = async () => {
-    if (!accountFormData.name || !accountFormData.adminUsername || !accountFormData.adminPassword) {
-      notify('يرجى ملء الحقول المطلوبة', 'warning');
+  useEffect(() => {
+    if (!showUserModal || !!editingUser || userFormData.isSuperAdmin || userFormData.roleIds.length > 0 || !defaultLimitedRoleId) {
       return;
     }
+
+    setUserFormData(prev => ({ ...prev, roleIds: [defaultLimitedRoleId] }));
+  }, [showUserModal, editingUser, userFormData.isSuperAdmin, userFormData.roleIds.length, defaultLimitedRoleId]);
+
+  useEffect(() => {
+    if (!showUserModal || !!editingUser) {
+      return;
+    }
+
+    if (accounts.length > 0 && !accounts.some(acc => acc.id === selectedAccountForUser)) {
+      setSelectedAccountForUser(accounts[0].id);
+      return;
+    }
+
+    const accountIdForRoles = selectedAccountForUser || Number(user?.accountId) || 1;
+    void loadRoles(accountIdForRoles);
+  }, [showUserModal, editingUser, selectedAccountForUser, loadRoles, user?.accountId, accounts]);
+
+  // ==================== Account Handlers ====================
+  const accountCoordinatesPreview = useMemo(
+    () => validateCoordinateInputs(accountFormData.latitude, accountFormData.longitude),
+    [accountFormData.latitude, accountFormData.longitude]
+  );
+
+  const openAccountLocationOnMap = () => {
+    const fallbackQuery = [accountFormData.address, accountFormData.name].filter(Boolean).join(' - ');
+    const mapUrl = buildMapUrl(accountFormData.latitude, accountFormData.longitude, fallbackQuery);
+    window.open(mapUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const detectAccountLocation = () => {
+    if (!navigator.geolocation) {
+      notify('المتصفح لا يدعم تحديد الموقع الجغرافي.', 'error');
+      return;
+    }
+
+    setDetectingAccountLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setAccountFormData(prev => ({
+          ...prev,
+          latitude: position.coords.latitude.toFixed(6),
+          longitude: position.coords.longitude.toFixed(6),
+        }));
+        notify('تم تحديد إحداثيات موقع الشركة.', 'success');
+        setDetectingAccountLocation(false);
+      },
+      () => {
+        notify('تعذر تحديد الموقع الحالي. تأكد من منح صلاحية الموقع.', 'error');
+        setDetectingAccountLocation(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+      }
+    );
+  };
+
+  const isValidEmailFormat = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  const isValidUsernameFormat = (value: string) => /^[a-zA-Z0-9._-]{3,50}$/.test(value);
+  const isValidPhoneFormat = (value: string) => /^[0-9+()\-\s]{7,20}$/.test(value);
+
+  const handleCreateAccount = async () => {
+    const normalizedName = accountFormData.name.trim();
+    const normalizedNameEn = accountFormData.nameEn.trim();
+    const normalizedEmail = accountFormData.email.trim();
+    const normalizedPhone = accountFormData.phone.trim();
+    const normalizedAddress = accountFormData.address.trim();
+    const normalizedCurrencySymbol = accountFormData.currencySymbol.trim();
+    const normalizedTaxNumber = accountFormData.taxNumber.trim();
+    const normalizedAdminUsername = accountFormData.adminUsername.trim();
+    const normalizedAdminPassword = accountFormData.adminPassword;
+    const normalizedAdminFullName = accountFormData.adminFullName.trim();
+
+    if (!normalizedName || !normalizedAdminUsername || !normalizedAdminPassword) {
+      notify('يرجى إدخال اسم الحساب واسم المستخدم وكلمة المرور للمسؤول.', 'warning');
+      return;
+    }
+
+    if (normalizedName.length < 2 || normalizedName.length > 120) {
+      notify('اسم الحساب يجب أن يكون بين حرفين و120 حرفًا.', 'warning');
+      return;
+    }
+
+    if (!isValidUsernameFormat(normalizedAdminUsername)) {
+      notify('اسم المستخدم يجب أن يكون من 3 إلى 50 حرفًا (أحرف/أرقام/._-).', 'warning');
+      return;
+    }
+
+    if (normalizedAdminPassword.length < 6) {
+      notify('كلمة المرور يجب ألا تقل عن 6 أحرف.', 'warning');
+      return;
+    }
+
+    if (normalizedEmail && !isValidEmailFormat(normalizedEmail)) {
+      notify('البريد الإلكتروني غير صالح.', 'warning');
+      return;
+    }
+
+    if (normalizedPhone && !isValidPhoneFormat(normalizedPhone)) {
+      notify('رقم الهاتف غير صالح. استخدم أرقامًا ورموزًا شائعة فقط.', 'warning');
+      return;
+    }
+
+    if (normalizedCurrencySymbol.length > 10) {
+      notify('رمز العملة طويل جدًا. الحد الأقصى 10 أحرف.', 'warning');
+      return;
+    }
+
+    if (accounts.some(acc => acc.name.trim().toLowerCase() === normalizedName.toLowerCase())) {
+      notify('اسم الحساب موجود بالفعل، اختر اسمًا مختلفًا.', 'warning');
+      return;
+    }
+
+    if (users.some(u => u.username.trim().toLowerCase() === normalizedAdminUsername.toLowerCase())) {
+      notify('اسم المستخدم المسؤول مستخدم بالفعل.', 'warning');
+      return;
+    }
+
+    const coordinateValidation = validateCoordinateInputs(accountFormData.latitude, accountFormData.longitude);
+    if (!coordinateValidation.isValid) {
+      notify(coordinateValidation.message || 'الإحداثيات غير صحيحة.', 'error');
+      return;
+    }
+
+    const resolvedAddress = composeAddressWithCoordinates(
+      normalizedAddress,
+      accountFormData.latitude,
+      accountFormData.longitude
+    );
 
     setLoading(true);
     try {
       const dto: CreateAccountDto = {
-        name: accountFormData.name,
-        nameEn: accountFormData.nameEn || undefined,
-        email: accountFormData.email || undefined,
-        phone: accountFormData.phone || undefined,
-        address: accountFormData.address || undefined,
-        currencySymbol: accountFormData.currencySymbol || 'ج.م',
-        taxNumber: accountFormData.taxNumber || undefined,
-        adminUsername: accountFormData.adminUsername,
-        adminPassword: accountFormData.adminPassword,
-        adminFullName: accountFormData.adminFullName || accountFormData.name,
+        name: normalizedName,
+        nameEn: normalizedNameEn || undefined,
+        email: normalizedEmail || undefined,
+        phone: normalizedPhone || undefined,
+        address: resolvedAddress || undefined,
+        currencySymbol: normalizedCurrencySymbol || 'ج.م',
+        taxNumber: normalizedTaxNumber || undefined,
+        adminUsername: normalizedAdminUsername,
+        adminPassword: normalizedAdminPassword,
+        adminFullName: normalizedAdminFullName || normalizedName,
       };
 
-      const newAccount = await accountApi.create(dto);
+      await accountApi.create(dto);
+      await loadAccounts();
+
+      // إضافة إشعار نظام دائم في مركز الإشعارات بعد إنشاء الحساب بنجاح.
+      if (user?.id) {
+        try {
+          await notificationsApi.create({
+            userId: Number(user.id),
+            title: 'إنشاء حساب جديد',
+            message: `تم إنشاء الحساب "${normalizedName}" بنجاح.`,
+            type: 'System',
+            link: '/settings',
+            icon: 'building',
+          });
+          refreshNotifications();
+        } catch {
+          // فشل الإشعار لا يجب أن يؤثر على نجاح عملية إنشاء الحساب.
+        }
+      }
       
-      // تحديث الحالة المحلية فوراً
-      setAccounts(prev => [...prev, newAccount]);
-      
-      notify('تم إنشاء الحساب بنجاح', 'success');
+      notify(`تم إنشاء الحساب "${normalizedName}" بنجاح.`, 'success');
       setShowAccountModal(false);
       resetAccountForm();
     } catch (error: any) {
@@ -750,6 +1659,18 @@ const Settings: React.FC = () => {
   const handleUpdateAccount = async () => {
     if (!editingAccount) return;
 
+    const coordinateValidation = validateCoordinateInputs(accountFormData.latitude, accountFormData.longitude);
+    if (!coordinateValidation.isValid) {
+      notify(coordinateValidation.message || 'الإحداثيات غير صحيحة.', 'error');
+      return;
+    }
+
+    const resolvedAddress = composeAddressWithCoordinates(
+      accountFormData.address,
+      accountFormData.latitude,
+      accountFormData.longitude
+    );
+
     setLoading(true);
     try {
       const dto: UpdateAccountDto = {
@@ -757,7 +1678,7 @@ const Settings: React.FC = () => {
         nameEn: accountFormData.nameEn || undefined,
         email: accountFormData.email || undefined,
         phone: accountFormData.phone || undefined,
-        address: accountFormData.address || undefined,
+        address: resolvedAddress || undefined,
         currencySymbol: accountFormData.currencySymbol,
         taxNumber: accountFormData.taxNumber || undefined,
         logoUrl: accountFormData.logoUrl || undefined,
@@ -836,13 +1757,16 @@ const Settings: React.FC = () => {
   };
 
   const openEditAccountModal = (account: ApiAccount) => {
+    const parsedAccountAddress = parseAddressCoordinates(account.address || '');
     setEditingAccount(account);
     setAccountFormData({
       name: account.name,
       nameEn: account.nameEn || '',
       email: account.email || '',
       phone: account.phone || '',
-      address: account.address || '',
+      address: parsedAccountAddress.cleanAddress,
+      latitude: parsedAccountAddress.latitude,
+      longitude: parsedAccountAddress.longitude,
       currencySymbol: account.currency || 'ج.م',
       taxNumber: account.taxNumber || '',
       logoUrl: account.logoUrl || '',
@@ -860,6 +1784,8 @@ const Settings: React.FC = () => {
       email: '',
       phone: '',
       address: '',
+      latitude: '',
+      longitude: '',
       currencySymbol: 'ج.م',
       taxNumber: '',
       logoUrl: '',
@@ -867,7 +1793,59 @@ const Settings: React.FC = () => {
       adminPassword: '',
       adminFullName: '',
     });
+    setDetectingAccountLocation(false);
     setEditingAccount(null);
+  };
+
+  const handleCreateDefaultRoleForSelectedAccount = async () => {
+    const targetAccountId = Number(selectedAccountForUser || user?.accountId || 1);
+    if (!Number.isFinite(targetAccountId) || targetAccountId <= 0) {
+      notify('يرجى اختيار حساب صالح قبل إنشاء الدور الافتراضي', 'warning');
+      return;
+    }
+
+    setCreatingDefaultRole(true);
+    try {
+      const latestRoles = await rolesApi.getAll(targetAccountId);
+      setRoles(latestRoles);
+
+      const existingDefaultRoleId = findDefaultLimitedRoleId(latestRoles);
+      if (existingDefaultRoleId) {
+        setUserFormData(prev => ({ ...prev, roleIds: [existingDefaultRoleId] }));
+        notify('تم العثور على الدور الافتراضي وتحديده تلقائياً', 'info');
+        return;
+      }
+
+      try {
+        await rolesApi.create({
+          accountId: targetAccountId,
+          name: 'NewAcount',
+          nameEn: 'NewAcount',
+          color: '#0f766e',
+          description: 'دور افتراضي بصلاحيات محدودة',
+        });
+      } catch (error: any) {
+        const message = error?.message || '';
+        if (!message.includes('يوجد دور بنفس الاسم')) {
+          throw error;
+        }
+      }
+
+      const refreshedRoles = await rolesApi.getAll(targetAccountId);
+      setRoles(refreshedRoles);
+
+      const defaultRoleId = findDefaultLimitedRoleId(refreshedRoles);
+      if (defaultRoleId) {
+        setUserFormData(prev => ({ ...prev, roleIds: [defaultRoleId] }));
+        notify('تم إنشاء الدور الافتراضي وتحديده للمستخدم ✓', 'success');
+      } else {
+        notify('تم تحديث قائمة الأدوار، اختر الدور المناسب للمستخدم', 'info');
+      }
+    } catch (error: any) {
+      notify(error.message || 'تعذر إنشاء الدور الافتراضي', 'error');
+    } finally {
+      setCreatingDefaultRole(false);
+    }
   };
 
   // ==================== Role Handlers ====================
@@ -1107,6 +2085,7 @@ const Settings: React.FC = () => {
       hasCustomInvoices: false,
       hasMultiCurrency: false,
       hasApiAccess: false,
+      hasOfflineMode: false,
       hasWhiteLabel: false,
     });
     setEditingPlan(null);
@@ -1139,6 +2118,7 @@ const Settings: React.FC = () => {
       hasCustomInvoices: plan.hasCustomInvoices,
       hasMultiCurrency: plan.hasMultiCurrency,
       hasApiAccess: plan.hasApiAccess,
+      hasOfflineMode: plan.hasOfflineMode,
       hasWhiteLabel: plan.hasWhiteLabel,
     });
     setShowPlanModal(true);
@@ -1264,26 +2244,55 @@ const Settings: React.FC = () => {
   };
 
   // ==================== Tabs ====================
-  const baseTabs = [
-    { id: 'general', label: 'عام', icon: SettingsIcon },
-    { id: 'accounts', label: 'الحسابات', icon: Building },
-    { id: 'users', label: 'المستخدمين', icon: Users },
-    { id: 'roles', label: 'الأدوار', icon: Shield },
-    { id: 'plans', label: 'الخطط', icon: Crown },
-    { id: 'server', label: 'إعدادات السيرفر', icon: Server },
-  ];
-  
-  // Add admin-only tabs
-  const tabs = isAdmin 
-    ? [...baseTabs, 
-       { id: 'tools', label: 'أدوات النظام', icon: Wrench },
-       { id: 'permissions', label: 'مصفوفة الصلاحيات', icon: Key },
-       { id: 'logs', label: 'سجل النشاطات', icon: Clock }
-      ]
-    : baseTabs;
+  // Regular users only see: general settings + manage their own sub-users
+  const tabs = useMemo(
+    () =>
+      isAdmin
+        ? [
+            { id: 'general', label: 'عام', icon: SettingsIcon },
+            { id: 'accounts', label: 'الحسابات', icon: Building },
+            { id: 'users', label: 'المستخدمين', icon: Users },
+            { id: 'roles', label: 'الأدوار', icon: Shield },
+            { id: 'plans', label: 'الخطط', icon: Crown },
+            { id: 'server', label: 'إعدادات السيرفر', icon: Server },
+            { id: 'tools', label: 'أدوات النظام', icon: Wrench },
+            { id: 'permissions', label: 'مصفوفة الصلاحيات', icon: Key },
+            { id: 'logs', label: 'سجل النشاطات', icon: Clock },
+          ]
+        : [
+            { id: 'general', label: 'عام', icon: SettingsIcon },
+            { id: 'users', label: 'الموظفون', icon: Users },
+          ],
+    [isAdmin]
+  );
+
+  useEffect(() => {
+    if (!tabs.some(tab => tab.id === activeTab)) {
+      setActiveTab('general');
+    }
+  }, [activeTab, tabs]);
 
   // بيانات البحث في الإعدادات - شاملة لكل شيء
-  const searchableSettings = [
+  const normalizeSearchText = useCallback((value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim(), []);
+  const normalizedSettingsSearch = normalizeSearchText(settingsSearch);
+  const searchTokens = useMemo(
+    () => (normalizedSettingsSearch ? normalizedSettingsSearch.split(' ').filter(Boolean) : []),
+    [normalizedSettingsSearch]
+  );
+
+  const matchesSettingsSearch = useCallback(
+    (...segments: Array<string | undefined | null>) => {
+      if (searchTokens.length === 0) {
+        return true;
+      }
+
+      const normalizedHaystack = normalizeSearchText(segments.filter(Boolean).join(' '));
+      return searchTokens.every(token => normalizedHaystack.includes(token));
+    },
+    [normalizeSearchText, searchTokens]
+  );
+
+  const searchableSettings: SearchableSettingItem[] = [
     // ============= الإعدادات العامة =============
     { keyword: 'المظهر', keywords: ['مظهر', 'ثيم', 'داكن', 'فاتح', 'theme', 'dark', 'light', 'لون', 'تصميم'], tab: 'general', path: 'عام > المظهر', icon: '🎨' },
     { keyword: 'الوضع الداكن', keywords: ['داكن', 'dark', 'ليلي', 'اسود'], tab: 'general', path: 'عام > المظهر', icon: '🌙' },
@@ -1343,6 +2352,19 @@ const Settings: React.FC = () => {
     
     // ============= أدوات النظام =============
     { keyword: 'أدوات النظام', keywords: ['أدوات', 'tools', 'توليد', 'بيانات', 'تجريبي', 'اختبار'], tab: 'tools', path: 'أدوات النظام', icon: '🛠️' },
+    { keyword: 'خيارات شاشة الدخول', keywords: ['شاشة الدخول', 'تسجيل الدخول', 'login', 'login screen', 'showDemoLogin', 'showAdminLogin', 'showForgotPassword', 'showRememberMe'], tab: 'tools', path: 'أدوات النظام > شاشة الدخول', icon: '🔐', settingKey: 'login-screen-options' },
+    { keyword: 'زر الدخول التجريبي', keywords: ['demo login', 'showDemoLogin', 'مستخدم تجريبي'], tab: 'tools', path: 'أدوات النظام > شاشة الدخول > زر الدخول التجريبي', icon: '✨', settingKey: 'showDemoLogin' },
+    { keyword: 'زر دخول الأدمن', keywords: ['admin login', 'showAdminLogin', 'دخول المدير'], tab: 'tools', path: 'أدوات النظام > شاشة الدخول > زر دخول الأدمن', icon: '🛡️', settingKey: 'showAdminLogin' },
+    { keyword: 'السماح بالتسجيل', keywords: ['allow registration', 'allowUserRegistration', 'تسجيل مستخدمين جدد'], tab: 'tools', path: 'أدوات النظام > شاشة الدخول > السماح بالتسجيل', icon: '🆕', settingKey: 'allowUserRegistration' },
+    { keyword: 'نسيت كلمة المرور', keywords: ['forgot password', 'showForgotPassword', 'استعادة كلمة المرور'], tab: 'tools', path: 'أدوات النظام > شاشة الدخول > نسيت كلمة المرور', icon: '🗝️', settingKey: 'showForgotPassword' },
+    { keyword: 'تذكرني', keywords: ['remember me', 'showRememberMe', 'البقاء مسجل'], tab: 'tools', path: 'أدوات النظام > شاشة الدخول > تذكرني', icon: '⏱️', settingKey: 'showRememberMe' },
+    { keyword: 'حدود الحروف في شاشة التسجيل', keywords: ['حدود حقول التسجيل', 'حدود الحروف', 'شاشة التسجيل', 'register limits', 'register max length', 'registerUsernameMaxLength', 'registerFullNameMaxLength', 'registerCompanyNameMaxLength', 'registerEmailMaxLength', 'registerPasswordMaxLength'], tab: 'tools', path: 'أدوات النظام > حدود الحروف في شاشة التسجيل', icon: '🧾', settingKey: 'register-field-limits' },
+    { keyword: 'حد اسم المستخدم في التسجيل', keywords: ['registerUsernameMaxLength', 'اسم المستخدم', 'حد الحروف', 'شاشة التسجيل'], tab: 'tools', path: 'أدوات النظام > حدود الحروف في شاشة التسجيل > اسم المستخدم', icon: '👤', settingKey: 'registerUsernameMaxLength' },
+    { keyword: 'حد الاسم الشخصي في التسجيل', keywords: ['registerFullNameMaxLength', 'الاسم الشخصي', 'حدود الحروف', 'شاشة التسجيل'], tab: 'tools', path: 'أدوات النظام > حدود الحروف في شاشة التسجيل > الاسم الشخصي', icon: '🪪', settingKey: 'registerFullNameMaxLength' },
+    { keyword: 'حد اسم الشركة في التسجيل', keywords: ['registerCompanyNameMaxLength', 'اسم الشركة', 'حدود الحروف', 'شاشة التسجيل'], tab: 'tools', path: 'أدوات النظام > حدود الحروف في شاشة التسجيل > اسم الشركة', icon: '🏢', settingKey: 'registerCompanyNameMaxLength' },
+    { keyword: 'حد البريد الإلكتروني في التسجيل', keywords: ['registerEmailMaxLength', 'email limit', 'حدود الحروف', 'شاشة التسجيل'], tab: 'tools', path: 'أدوات النظام > حدود الحروف في شاشة التسجيل > البريد الإلكتروني', icon: '📧', settingKey: 'registerEmailMaxLength' },
+    { keyword: 'حد كلمة المرور في التسجيل', keywords: ['registerPasswordMaxLength', 'password length', 'حدود الحروف', 'شاشة التسجيل'], tab: 'tools', path: 'أدوات النظام > حدود الحروف في شاشة التسجيل > كلمة المرور', icon: '🔒', settingKey: 'registerPasswordMaxLength' },
+    { keyword: 'محاولات الدخول الفاشلة', keywords: ['maxLoginAttempts', 'failed login attempts', 'security'], tab: 'tools', path: 'أدوات النظام > إعدادات الأمان > محاولات الدخول الفاشلة', icon: '🚫', settingKey: 'maxLoginAttempts' },
     { keyword: 'توليد بيانات', keywords: ['mock', 'generate', 'test data', 'بيانات تجريبية', 'تزييف'], tab: 'tools', path: 'أدوات النظام > توليد بيانات', icon: '🎲' },
     { keyword: 'تصدير البيانات', keywords: ['export', 'تصدير', 'backup', 'نسخ', 'حفظ'], tab: 'tools', path: 'أدوات النظام > تصدير', icon: '📤' },
     { keyword: 'استيراد البيانات', keywords: ['import', 'استيراد', 'restore', 'استرجاع', 'تحميل'], tab: 'tools', path: 'أدوات النظام > استيراد', icon: '📥' },
@@ -1382,74 +2404,244 @@ const Settings: React.FC = () => {
     { keyword: 'التخزين المحلي', keywords: ['تخزين', 'local', 'storage', 'محلي', 'ذاكرة'], tab: 'tools', path: 'أدوات > التخزين', icon: '💾' },
   ];
 
-  // إضافة الحسابات الفعلية للبحث
-  const dynamicAccountResults = settingsSearch.trim() 
+  const availableSettingsTabs = new Set<TabType>(tabs.map(tab => tab.id as TabType));
+
+  useEffect(() => {
+    if (!normalizedSettingsSearch) {
+      setComponentSearchResults(prev => (prev.length > 0 ? [] : prev));
+      return;
+    }
+
+    const container = settingsContentRef.current;
+    if (!container) {
+      setComponentSearchResults(prev => (prev.length > 0 ? [] : prev));
+      return;
+    }
+
+    const activeTabLabel = tabs.find(tab => tab.id === activeTab)?.label || activeTab;
+    const animationFrame = window.requestAnimationFrame(() => {
+      const candidates = Array.from(
+        container.querySelectorAll<HTMLElement>('[data-search-setting], h2, h3, h4, label, button, th, td, p')
+      );
+
+      const uniqueKeys = new Set<string>();
+      const uiResults: SettingsSearchResult[] = [];
+
+      for (const element of candidates) {
+        if (uiResults.length >= 12) {
+          break;
+        }
+
+        const isVisible = element.getClientRects().length > 0;
+        if (!isVisible) {
+          continue;
+        }
+
+        const rawText = (element.textContent || '').replace(/\s+/g, ' ').trim();
+        if (rawText.length < 3) {
+          continue;
+        }
+
+        const settingKey = element.getAttribute('data-search-setting') || undefined;
+        const extraKeywords = element.getAttribute('data-search-keywords') || '';
+        if (!matchesSettingsSearch(rawText, extraKeywords, settingKey || '')) {
+          continue;
+        }
+
+        const keyword = rawText.length > 70 ? `${rawText.slice(0, 67)}...` : rawText;
+        const uniqueKey = `${activeTab}|${settingKey || ''}|${keyword.toLowerCase()}`;
+        if (uniqueKeys.has(uniqueKey)) {
+          continue;
+        }
+
+        uniqueKeys.add(uniqueKey);
+        uiResults.push({
+          keyword,
+          keywords: [extraKeywords, settingKey || '', rawText].filter(Boolean),
+          tab: activeTab,
+          path: `${activeTabLabel} > مكونات الواجهة`,
+          icon: '🧩',
+          selector: settingKey ? `[data-search-setting="${settingKey}"]` : undefined,
+          settingKey,
+        });
+      }
+
+      setComponentSearchResults(prev => {
+        if (prev.length === uiResults.length) {
+          const prevSignature = prev
+            .map(item => `${item.tab}|${item.settingKey || ''}|${item.selector || ''}|${item.keyword}`)
+            .join('||');
+          const nextSignature = uiResults
+            .map(item => `${item.tab}|${item.settingKey || ''}|${item.selector || ''}|${item.keyword}`)
+            .join('||');
+
+          if (prevSignature === nextSignature) {
+            return prev;
+          }
+        }
+
+        return uiResults;
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [activeTab, normalizedSettingsSearch, tabs, matchesSettingsSearch]);
+
+  const tabSearchResults: SettingsSearchResult[] = normalizedSettingsSearch
+    ? tabs
+        .filter(tab => matchesSettingsSearch(tab.label, tab.id))
+        .map(tab => ({
+          keyword: tab.label,
+          keywords: [tab.id],
+          tab: tab.id as TabType,
+          path: `التبويبات > ${tab.label}`,
+          icon: '📑',
+        }))
+    : [];
+
+  const dynamicAccountResults: SettingsSearchResult[] = normalizedSettingsSearch && availableSettingsTabs.has('accounts')
     ? accounts
-        .filter(acc => 
-          acc.name.toLowerCase().includes(settingsSearch.toLowerCase()) ||
-          acc.nameEn?.toLowerCase().includes(settingsSearch.toLowerCase()) ||
-          acc.email?.toLowerCase().includes(settingsSearch.toLowerCase())
-        )
+        .filter(acc => matchesSettingsSearch(acc.name, acc.nameEn, acc.email))
         .map(acc => ({
           keyword: acc.name,
           keywords: [acc.nameEn || '', acc.email || ''],
-          tab: 'accounts' as const,
+          tab: 'accounts',
           path: `الحسابات > ${acc.name}`,
           icon: '🏢',
           accountId: acc.id
         }))
     : [];
 
-  // إضافة المستخدمين الفعليين للبحث
-  const dynamicUserResults = settingsSearch.trim() 
+  const dynamicUserResults: SettingsSearchResult[] = normalizedSettingsSearch && availableSettingsTabs.has('users')
     ? users
-        .filter(u => 
-          u.fullName.toLowerCase().includes(settingsSearch.toLowerCase()) ||
-          u.username.toLowerCase().includes(settingsSearch.toLowerCase()) ||
-          u.email?.toLowerCase().includes(settingsSearch.toLowerCase())
-        )
+        .filter(u => matchesSettingsSearch(u.fullName, u.username, u.email))
         .map(u => ({
           keyword: u.fullName,
           keywords: [u.username, u.email || ''],
-          tab: 'users' as const,
+          tab: 'users',
           path: `المستخدمين > ${u.fullName}`,
           icon: '👤',
           userId: u.id
         }))
     : [];
 
-  // إضافة الأدوار الفعلية للبحث
-  const dynamicRoleResults = settingsSearch.trim() 
+  const dynamicRoleResults: SettingsSearchResult[] = normalizedSettingsSearch && availableSettingsTabs.has('roles')
     ? roles
-        .filter(r => 
-          r.name.toLowerCase().includes(settingsSearch.toLowerCase()) ||
-          r.nameEn?.toLowerCase().includes(settingsSearch.toLowerCase())
-        )
+        .filter(r => matchesSettingsSearch(r.name, r.nameEn))
         .map(r => ({
           keyword: r.name,
           keywords: [r.nameEn || ''],
-          tab: 'roles' as const,
+          tab: 'roles',
           path: `الأدوار > ${r.name}`,
           icon: '👑',
           roleId: r.id
         }))
     : [];
 
-  // نتائج البحث - دمج الثابتة والديناميكية
-  const staticSearchResults = settingsSearch.trim() 
-    ? searchableSettings.filter(item => 
-        item.keyword.includes(settingsSearch) || 
-        item.keywords.some(k => k.includes(settingsSearch.toLowerCase()))
-      )
+  const dynamicPlanResults: SettingsSearchResult[] = normalizedSettingsSearch && availableSettingsTabs.has('plans')
+    ? plans
+        .filter(p => matchesSettingsSearch(p.name, p.nameEn, p.description))
+        .map(p => ({
+          keyword: p.name,
+          keywords: [p.nameEn || '', p.description || ''],
+          tab: 'plans',
+          path: `الخطط > ${p.name}`,
+          icon: '💎',
+          planId: p.id
+        }))
     : [];
-  
-  // دمج جميع النتائج مع تحديد الأولوية
-  const searchResults = [
-    ...dynamicAccountResults.slice(0, 5),  // أول 5 حسابات
-    ...dynamicUserResults.slice(0, 5),     // أول 5 مستخدمين
-    ...dynamicRoleResults.slice(0, 5),     // أول 5 أدوار
-    ...staticSearchResults.slice(0, 15),   // أول 15 إعداد ثابت
-  ];
+
+  const dynamicLogResults: SettingsSearchResult[] = normalizedSettingsSearch && availableSettingsTabs.has('logs')
+    ? activityLogs
+        .filter(log => matchesSettingsSearch(log.action, log.entityType, log.entityName, log.description, log.descriptionEn, log.ipAddress))
+        .map(log => ({
+          keyword: log.entityName || log.action || 'سجل نشاط',
+          keywords: [log.action || '', log.entityType || '', log.description || ''],
+          tab: 'logs',
+          path: `سجل النشاطات > ${log.action || 'عنصر'}`,
+          icon: '📜',
+          logId: log.id,
+        }))
+    : [];
+
+  const permissionModuleResults: SettingsSearchResult[] = normalizedSettingsSearch && availableSettingsTabs.has('permissions')
+    ? SYSTEM_MODULES
+        .filter(module => matchesSettingsSearch(module.name, module.id, module.category))
+        .map(module => ({
+          keyword: module.name,
+          keywords: [module.id, module.category],
+          tab: 'permissions',
+          path: `مصفوفة الصلاحيات > ${module.name}`,
+          icon: '🔐',
+          permissionCategory: module.category as 'pages' | 'menu' | 'tabs' | 'actions' | 'features',
+        }))
+    : [];
+
+  const staticSearchResults: SettingsSearchResult[] = normalizedSettingsSearch
+    ? searchableSettings
+        .filter(item => availableSettingsTabs.has(item.tab))
+        .filter(item => matchesSettingsSearch(item.keyword, item.path, ...item.keywords))
+        .map(item => ({
+          ...item,
+          selector: item.settingKey ? `[data-search-setting="${item.settingKey}"]` : undefined,
+        }))
+    : [];
+
+  const searchResults: SettingsSearchResult[] = normalizedSettingsSearch
+    ? [
+        ...tabSearchResults.slice(0, 6),
+        ...dynamicAccountResults.slice(0, 6),
+        ...dynamicUserResults.slice(0, 6),
+        ...dynamicRoleResults.slice(0, 6),
+        ...dynamicPlanResults.slice(0, 6),
+        ...dynamicLogResults.slice(0, 6),
+        ...permissionModuleResults.slice(0, 10),
+        ...componentSearchResults.slice(0, 12),
+        ...staticSearchResults.slice(0, 20),
+      ]
+    : [];
+
+  const uniqueSearchResults = Array.from(
+    new Map(searchResults.map(result => [`${result.tab}|${result.path}|${result.keyword}|${result.selector || ''}`, result])).values()
+  );
+
+  const normalizedAssignmentSearch = assignmentSearch.trim().toLowerCase();
+  const filteredBrandAssignments = brandAssignments.filter((assignment) => {
+    if (assignmentFilterMode !== 'all' && assignment.mode !== assignmentFilterMode) {
+      return false;
+    }
+
+    if (assignmentFilterStatus === 'enabled' && assignment.enabled === false) {
+      return false;
+    }
+    if (assignmentFilterStatus === 'disabled' && assignment.enabled !== false) {
+      return false;
+    }
+
+    if (assignmentFilterAccountId !== 'all') {
+      const currentAccountId = assignment.accountId ? String(assignment.accountId) : '';
+      if (currentAccountId !== assignmentFilterAccountId) {
+        return false;
+      }
+    }
+
+    if (!normalizedAssignmentSearch) {
+      return true;
+    }
+
+    const identityName = brandIdentities.find(item => item.id === assignment.identityId)?.name || '';
+    const accountName = accounts.find(item => item.id === assignment.accountId)?.name || '';
+    const haystack = [
+      identityName,
+      accountName,
+      assignment.notes || '',
+      getModeLabel(assignment.mode),
+    ].join(' ').toLowerCase();
+
+    return haystack.includes(normalizedAssignmentSearch);
+  });
 
   return (
     <div className="space-y-6">
@@ -1478,30 +2670,46 @@ const Settings: React.FC = () => {
             />
             
             {/* نتائج البحث */}
-            {searchResults.length > 0 && (
+            {uniqueSearchResults.length > 0 && (
               <div className="absolute top-full mt-2 w-full bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 max-h-80 overflow-y-auto">
                 <div className="p-2 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
                   <span className="text-xs text-slate-500 dark:text-slate-400">
-                    {searchResults.length} نتيجة
+                    {uniqueSearchResults.length} نتيجة
                   </span>
                 </div>
-                {searchResults.map((result, idx) => (
+                {uniqueSearchResults.map((result, idx) => (
                   <button
                     key={idx}
                     onClick={() => {
-                      setActiveTab(result.tab as TabType);
+                      let targetSelector: string | undefined = result.selector;
+                      if (!targetSelector && result.accountId) {
+                        targetSelector = `[data-search-account-id=\"${result.accountId}\"]`;
+                      } else if (!targetSelector && result.userId) {
+                        targetSelector = `[data-search-user-id=\"${result.userId}\"]`;
+                      } else if (!targetSelector && result.roleId) {
+                        targetSelector = `[data-search-role-id=\"${result.roleId}\"]`;
+                      } else if (!targetSelector && result.planId) {
+                        targetSelector = `[data-search-plan-id=\"${result.planId}\"]`;
+                      } else if (!targetSelector && result.logId) {
+                        targetSelector = `[data-search-log-id=\"${result.logId}\"]`;
+                      }
+
+                      setActiveTab(result.tab);
+                      setPendingSearchNavigation({ tab: result.tab, keyword: result.keyword, selector: targetSelector });
                       setSettingsSearch('');
-                      
-                      // فلترة بناءً على نوع النتيجة
-                      if ('accountId' in result && result.tab === 'accounts') {
-                        // البحث في الحسابات - تعيين فلتر الحساب
+
+                      if (result.tab === 'accounts') {
                         setAccountSearch(result.keyword);
-                      } else if ('userId' in result && result.tab === 'users') {
-                        // البحث في المستخدمين - تعيين فلتر المستخدم
+                      } else if (result.tab === 'users') {
                         setUserSearch(result.keyword);
-                      } else if ('roleId' in result && result.tab === 'roles') {
-                        // البحث في الأدوار - تعيين فلتر الدور
+                      } else if (result.tab === 'roles') {
                         setRoleSearch(result.keyword);
+                      } else if (result.tab === 'plans') {
+                        setPlanSearch(result.keyword);
+                      } else if (result.tab === 'logs') {
+                        setLogsSearch(result.keyword);
+                      } else if (result.tab === 'permissions' && result.permissionCategory) {
+                        setSelectedCategory(result.permissionCategory);
                       }
                     }}
                     className="w-full px-4 py-3 text-right hover:bg-primary/10 dark:hover:bg-primary/20 flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-700 last:border-0 transition-colors"
@@ -1519,7 +2727,7 @@ const Settings: React.FC = () => {
               </div>
             )}
             
-            {settingsSearch.trim() && searchResults.length === 0 && (
+            {settingsSearch.trim() && uniqueSearchResults.length === 0 && (
               <div className="absolute top-full mt-2 w-full bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 p-4 text-center text-slate-500 dark:text-slate-400">
                 لا توجد نتائج
               </div>
@@ -1547,7 +2755,7 @@ const Settings: React.FC = () => {
       </div>
 
       {/* Tab Content */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
+      <div ref={settingsContentRef} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
         
         {/* ==================== General Tab ==================== */}
         {activeTab === 'general' && (
@@ -1612,6 +2820,356 @@ const Settings: React.FC = () => {
               </form>
             </div>
 
+            {/* Brand Identities */}
+            {isAdmin && (
+              <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-4 border border-slate-200/70 dark:border-slate-700/70">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <Palette className="text-primary" />
+                    <div>
+                      <h3 className="font-medium text-slate-800 dark:text-white">الهويات اللونية</h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">إضافة وتعديل وتخصيص الهوية حسب الحساب أو الفترة الزمنية</p>
+                    </div>
+                  </div>
+                  <div className="px-3 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
+                    <span className="text-slate-500 dark:text-slate-400 ml-1">الهوية النشطة الآن:</span>
+                    <span className="font-medium text-slate-800 dark:text-white">{activeBrandIdentity?.name || 'غير محددة'}</span>
+                  </div>
+                </div>
+
+                <div className="grid lg:grid-cols-2 gap-4">
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">الهويات المتاحة</h4>
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      {brandIdentities.map(identity => (
+                        <div key={identity.id} className="p-3 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h5 className="font-medium text-slate-800 dark:text-white">{identity.name}</h5>
+                                {identity.isBuiltIn && (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                    افتراضية
+                                  </span>
+                                )}
+                              </div>
+                              {identity.description && (
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{identity.description}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleEditIdentity(identity)}
+                                className="p-1.5 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                                title="تعديل"
+                              >
+                                <Edit2 size={15} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteIdentity(identity)}
+                                disabled={identity.isBuiltIn}
+                                className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="حذف"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex gap-1.5 mt-3">
+                            {[identity.palette.primary, identity.palette.secondary, identity.palette.success, identity.palette.danger, identity.palette.warning].map((color, idx) => (
+                              <span
+                                key={`${identity.id}_${idx}`}
+                                className="w-6 h-6 rounded-md border border-slate-300/80 dark:border-slate-600"
+                                style={{ backgroundColor: color }}
+                                title={color}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      {editingIdentityId ? 'تعديل الهوية' : 'إضافة هوية جديدة'}
+                    </h4>
+                    <div className="p-3 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-3">
+                      <input
+                        type="text"
+                        value={identityFormData.name}
+                        onChange={(e) => setIdentityFormData(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="اسم الهوية"
+                        className="w-full p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
+                      />
+                      <input
+                        type="text"
+                        value={identityFormData.description}
+                        onChange={(e) => setIdentityFormData(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="وصف مختصر (اختياري)"
+                        className="w-full p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
+                      />
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {[
+                          { key: 'primary', label: 'Primary' },
+                          { key: 'secondary', label: 'Secondary' },
+                          { key: 'success', label: 'Success' },
+                          { key: 'danger', label: 'Danger' },
+                          { key: 'warning', label: 'Warning' },
+                        ].map(field => (
+                          <div key={field.key} className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+                            <input
+                              type="color"
+                              value={identityFormData[field.key as keyof typeof identityFormData] as string}
+                              onChange={(e) => setIdentityFormData(prev => ({ ...prev, [field.key]: e.target.value }))}
+                              className="w-10 h-9 p-0 border-0 bg-transparent"
+                            />
+                            <div className="flex-1">
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400">{field.label}</p>
+                              <input
+                                type="text"
+                                value={identityFormData[field.key as keyof typeof identityFormData] as string}
+                                onChange={(e) => setIdentityFormData(prev => ({ ...prev, [field.key]: e.target.value }))}
+                                className="w-full text-sm bg-transparent text-slate-700 dark:text-slate-200 outline-none"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={handleSaveIdentity}
+                          className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 flex items-center gap-2"
+                        >
+                          <Save size={16} />
+                          {editingIdentityId ? 'حفظ التعديل' : 'إضافة الهوية'}
+                        </button>
+                        {editingIdentityId && (
+                          <button
+                            onClick={resetIdentityForm}
+                            className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600"
+                          >
+                            إلغاء
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">تخصيص الهوية للحساب أو الفترة</h4>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-2">
+                    <select
+                      value={assignmentFormData.identityId}
+                      onChange={(e) => setAssignmentFormData(prev => ({ ...prev, identityId: e.target.value }))}
+                      className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                    >
+                      <option value="">اختر الهوية</option>
+                      {brandIdentities.map(identity => (
+                        <option key={identity.id} value={identity.id}>{identity.name}</option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={assignmentFormData.mode}
+                      onChange={(e) => setAssignmentFormData(prev => ({ ...prev, mode: e.target.value as BrandAssignmentMode }))}
+                      className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                    >
+                      <option value="global">عام</option>
+                      <option value="account">حسب الحساب</option>
+                      <option value="time">حسب الفترة</option>
+                      <option value="account_time">حسب الحساب والفترة</option>
+                    </select>
+
+                    {(assignmentFormData.mode === 'account' || assignmentFormData.mode === 'account_time') && (
+                      <select
+                        value={assignmentFormData.accountId}
+                        onChange={(e) => setAssignmentFormData(prev => ({ ...prev, accountId: e.target.value }))}
+                        className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                      >
+                        <option value="">اختر الحساب</option>
+                        {accounts.map(account => (
+                          <option key={account.id} value={account.id}>{account.name}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    <input
+                      type="number"
+                      value={assignmentFormData.priority}
+                      onChange={(e) => setAssignmentFormData(prev => ({ ...prev, priority: Number(e.target.value) }))}
+                      placeholder="الأولوية"
+                      className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                    />
+                  </div>
+
+                  {(assignmentFormData.mode === 'time' || assignmentFormData.mode === 'account_time') && (
+                    <div className="grid md:grid-cols-2 gap-2">
+                      <input
+                        type="datetime-local"
+                        value={assignmentFormData.startAt}
+                        onChange={(e) => setAssignmentFormData(prev => ({ ...prev, startAt: e.target.value }))}
+                        className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                      />
+                      <input
+                        type="datetime-local"
+                        value={assignmentFormData.endAt}
+                        onChange={(e) => setAssignmentFormData(prev => ({ ...prev, endAt: e.target.value }))}
+                        className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex flex-col md:flex-row md:items-center gap-2">
+                    <input
+                      type="text"
+                      value={assignmentFormData.notes}
+                      onChange={(e) => setAssignmentFormData(prev => ({ ...prev, notes: e.target.value }))}
+                      placeholder="ملاحظات (اختياري)"
+                      className="flex-1 p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                    />
+                    <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={assignmentFormData.enabled}
+                        onChange={(e) => setAssignmentFormData(prev => ({ ...prev, enabled: e.target.checked }))}
+                        className="rounded border-slate-300 dark:border-slate-600"
+                      />
+                      مفعل
+                    </label>
+                    <button
+                      onClick={handleSaveAssignment}
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                    >
+                      {editingAssignmentId ? 'حفظ التخصيص' : 'إضافة تخصيص'}
+                    </button>
+                    {editingAssignmentId && (
+                      <button
+                        onClick={resetAssignmentForm}
+                        className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600"
+                      >
+                        إلغاء
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-2">
+                      <input
+                        type="text"
+                        value={assignmentSearch}
+                        onChange={(e) => setAssignmentSearch(e.target.value)}
+                        placeholder="بحث في التخصيصات..."
+                        className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                      />
+                      <select
+                        value={assignmentFilterMode}
+                        onChange={(e) => setAssignmentFilterMode(e.target.value as 'all' | BrandAssignmentMode)}
+                        className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                      >
+                        <option value="all">كل الأوضاع</option>
+                        <option value="global">عام</option>
+                        <option value="account">حسب الحساب</option>
+                        <option value="time">حسب الفترة</option>
+                        <option value="account_time">حسب الحساب والفترة</option>
+                      </select>
+                      <select
+                        value={assignmentFilterStatus}
+                        onChange={(e) => setAssignmentFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}
+                        className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                      >
+                        <option value="all">كل الحالات</option>
+                        <option value="enabled">مفعل</option>
+                        <option value="disabled">معطل</option>
+                      </select>
+                      <select
+                        value={assignmentFilterAccountId}
+                        onChange={(e) => setAssignmentFilterAccountId(e.target.value)}
+                        className="p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white"
+                      >
+                        <option value="all">كل الحسابات</option>
+                        {accounts.map(account => (
+                          <option key={account.id} value={account.id}>{account.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => {
+                          setAssignmentSearch('');
+                          setAssignmentFilterMode('all');
+                          setAssignmentFilterStatus('all');
+                          setAssignmentFilterAccountId('all');
+                        }}
+                        className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600"
+                      >
+                        تصفير الفلاتر
+                      </button>
+                    </div>
+
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      عرض {filteredBrandAssignments.length} من {brandAssignments.length} تخصيص
+                    </div>
+
+                    <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {filteredBrandAssignments.map(assignment => {
+                      const identity = brandIdentities.find(item => item.id === assignment.identityId);
+                      const account = accounts.find(item => item.id === assignment.accountId);
+                      return (
+                        <div key={assignment.id} className="p-3 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2 text-sm">
+                                <span className="font-semibold text-slate-800 dark:text-white">{identity?.name || assignment.identityId}</span>
+                                <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[11px]">
+                                  {getModeLabel(assignment.mode)}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-full text-[11px] ${assignment.enabled ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400'}`}>
+                                  {assignment.enabled ? 'مفعل' : 'معطل'}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex flex-wrap gap-3">
+                                <span>أولوية: {assignment.priority}</span>
+                                {account && <span>حساب: {account.name}</span>}
+                                {assignment.startAt && <span>من: {new Date(assignment.startAt).toLocaleString('ar-EG')}</span>}
+                                {assignment.endAt && <span>إلى: {new Date(assignment.endAt).toLocaleString('ar-EG')}</span>}
+                              </div>
+                              {assignment.notes && (
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{assignment.notes}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleEditAssignment(assignment)}
+                                className="p-1.5 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                                title="تعديل"
+                              >
+                                <Edit2 size={15} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAssignment(assignment.id)}
+                                className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                title="حذف"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {filteredBrandAssignments.length === 0 && (
+                      <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-6">
+                        لا توجد تخصيصات مطابقة للفلاتر الحالية
+                      </div>
+                    )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* بيانات الحساب */}
             <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-4">
               <div className="flex items-center justify-between">
@@ -1670,7 +3228,7 @@ const Settings: React.FC = () => {
                     {currentAccount.address && (
                       <div className="flex items-center gap-2 text-sm">
                         <MapPin size={14} className="text-slate-400" />
-                        <span className="text-slate-600 dark:text-slate-300">{currentAccount.address}</span>
+                        <span className="text-slate-600 dark:text-slate-300">{removeCoordinateTokenFromAddress(currentAccount.address)}</span>
                       </div>
                     )}
                     {currentAccount.taxNumber && (
@@ -1737,7 +3295,7 @@ const Settings: React.FC = () => {
         )}
 
         {/* ==================== Accounts Tab ==================== */}
-        {activeTab === 'accounts' && (
+        {activeTab === 'accounts' && isAdmin && (
           <div className="p-6 space-y-4">
             {/* Header & Actions */}
             <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
@@ -1803,6 +3361,7 @@ const Settings: React.FC = () => {
                   .map(account => (
                   <div
                     key={account.id}
+                    data-search-account-id={account.id}
                     className="p-5 border border-slate-200 dark:border-slate-700 rounded-xl hover:border-primary dark:hover:border-primary transition-all hover:shadow-lg cursor-pointer group"
                     onClick={() => openEditAccountModal(account)}
                   >
@@ -1871,15 +3430,59 @@ const Settings: React.FC = () => {
                           <Users size={14} />
                           <span>{account.usersCount} مستخدم</span>
                         </div>
-                        <ChevronDown 
-                          size={16} 
-                          className={`transition-transform ${expandedAccountIds.includes(account.id) ? 'rotate-180' : ''}`} 
-                        />
+                        <div className="flex items-center gap-1 text-xs font-medium">
+                          <span>
+                            {expandedAccountIds.includes(account.id) ? 'طي التفاصيل' : 'فرد التفاصيل'}
+                          </span>
+                          <ChevronDown 
+                            size={16} 
+                            className={`transition-transform ${expandedAccountIds.includes(account.id) ? 'rotate-180' : ''}`} 
+                          />
+                        </div>
                       </div>
                       
                       {/* قائمة المستخدمين عند التوسيع */}
                       {expandedAccountIds.includes(account.id) && (
                         <div className="mt-2 mr-4 pr-2 border-r-2 border-primary/30">
+                          <div className="mb-2 p-2 rounded-lg bg-slate-50 dark:bg-slate-700/40 border border-slate-200 dark:border-slate-600/60 space-y-1">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-slate-500 dark:text-slate-400">الدور</span>
+                              <span className="font-medium text-slate-700 dark:text-slate-200 truncate max-w-[60%]">
+                                {(() => {
+                                  const usersInAccount = accountUsersMap[account.id] || [];
+                                  const primaryUser = usersInAccount.find(u => u.isSuperAdmin) || usersInAccount[0];
+                                  if (!primaryUser) return '-';
+                                  if (primaryUser.isSuperAdmin) return 'Admin';
+                                  return primaryUser.roles?.[0]?.name || primaryUser.roles?.[0]?.nameEn || 'NewAcount';
+                                })()}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-slate-500 dark:text-slate-400">المجموعة</span>
+                              <span className="font-medium text-slate-700 dark:text-slate-200 truncate max-w-[60%]">
+                                {(() => {
+                                  const usersInAccount = accountUsersMap[account.id] || [];
+                                  const hasAdmin = usersInAccount.some(u => u.isSuperAdmin);
+                                  return hasAdmin ? 'مجموعة الإدارة' : 'مجموعة الحسابات';
+                                })()}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-slate-500 dark:text-slate-400">اسم الحساب / الشركة</span>
+                              <span className="font-medium text-slate-700 dark:text-slate-200 truncate max-w-[60%]">{account.name}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-slate-500 dark:text-slate-400">اسم المستخدم</span>
+                              <span className="font-medium text-slate-700 dark:text-slate-200 truncate max-w-[60%]">
+                                {(() => {
+                                  const usersInAccount = accountUsersMap[account.id] || [];
+                                  const primaryUser = usersInAccount.find(u => u.isSuperAdmin) || usersInAccount[0];
+                                  return primaryUser?.username || '-';
+                                })()}
+                              </span>
+                            </div>
+                          </div>
+
                           {accountUsersLoading[account.id] ? (
                             <div className="flex items-center gap-2 py-2 text-xs text-slate-400">
                               <Loader2 size={12} className="animate-spin" />
@@ -2046,7 +3649,7 @@ const Settings: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                     {filteredUsers.map(u => (
-                      <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                      <tr key={u.id} data-search-user-id={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
                         <td className="p-4">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 bg-gradient-to-br from-primary to-blue-600 rounded-full flex items-center justify-center text-white font-bold">
@@ -2200,7 +3803,7 @@ const Settings: React.FC = () => {
               /* Grid View for Users */
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredUsers.map(u => (
-                  <div key={u.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 hover:shadow-lg transition-all">
+                  <div key={u.id} data-search-user-id={u.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 hover:shadow-lg transition-all">
                     <div className="flex justify-between items-start mb-3">
                       <div className="flex items-center gap-3">
                         <div className="w-12 h-12 bg-gradient-to-br from-primary to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
@@ -2284,7 +3887,7 @@ const Settings: React.FC = () => {
         )}
 
         {/* ==================== Roles Tab ==================== */}
-        {activeTab === 'roles' && (
+        {activeTab === 'roles' && isAdmin && (
           <div className="p-6 space-y-4">
             <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
               <h2 className="text-lg font-bold text-slate-800 dark:text-white">
@@ -2347,6 +3950,7 @@ const Settings: React.FC = () => {
                   return (
                     <div
                       key={role.id}
+                      data-search-role-id={role.id}
                       className="bg-white dark:bg-slate-800 p-4 border border-slate-200 dark:border-slate-700 rounded-xl hover:shadow-lg transition-all"
                     >
                       <div className="flex items-center justify-between mb-3">
@@ -2430,7 +4034,7 @@ const Settings: React.FC = () => {
         )}
 
         {/* ==================== Plans Tab ==================== */}
-        {activeTab === 'plans' && (
+        {activeTab === 'plans' && isAdmin && (
           <div className="p-6 space-y-4">
             <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
               <div>
@@ -2494,6 +4098,7 @@ const Settings: React.FC = () => {
                 </button>
               </div>
             ) : (
+              <>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 {filteredPlans.map(plan => {
                   const planColors: Record<string, { bg: string; border: string; text: string }> = {
@@ -2509,6 +4114,7 @@ const Settings: React.FC = () => {
                   return (
                     <div
                       key={plan.id}
+                      data-search-plan-id={plan.id}
                       className={`relative p-5 rounded-xl border-2 ${colors.border} ${colors.bg} ${!plan.isActive ? 'opacity-60' : ''} hover:shadow-lg transition-all`}
                     >
                       {/* Popular Badge */}
@@ -2596,6 +4202,9 @@ const Settings: React.FC = () => {
                         {plan.hasApiAccess && (
                           <span className="px-2 py-0.5 text-xs bg-amber-200 dark:bg-amber-900 rounded" title="API Access">🔌</span>
                         )}
+                        {plan.hasOfflineMode && (
+                          <span className="px-2 py-0.5 text-xs bg-purple-200 dark:bg-purple-900 rounded" title="Offline Mode">📴</span>
+                        )}
                         {plan.hasWhiteLabel && (
                           <span className="px-2 py-0.5 text-xs bg-rose-200 dark:bg-rose-900 rounded" title="تخصيص كامل">🏷️</span>
                         )}
@@ -2628,18 +4237,113 @@ const Settings: React.FC = () => {
                           >
                             <Trash2 size={16} />
                           </button>
+                          <button
+                            onClick={() => setExpandedPlanPermsId(prev => prev === plan.id ? null : plan.id)}
+                            className={`p-1.5 ${expandedPlanPermsId === plan.id ? 'text-violet-700 dark:text-violet-300' : 'text-violet-500 hover:text-violet-700'}`}
+                            title="صلاحيات القوائم لهذه الخطة"
+                          >
+                            <Key size={16} />
+                          </button>
                         </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
+
+              {/* ===== Plan Permissions Inline Panel ===== */}
+              {expandedPlanPermsId !== null && (() => {
+                const targetPlan = filteredPlans.find(p => p.id === expandedPlanPermsId);
+                if (!targetPlan) return null;
+                const planKey = `plan_${targetPlan.id}`;
+                const menuItems = [
+                  { id: 'menu_dashboard',     label: 'لوحة التحكم' },
+                  { id: 'menu_products',      label: 'المنتجات' },
+                  { id: 'menu_customers',     label: 'العملاء' },
+                  { id: 'menu_invoices',      label: 'الفواتير' },
+                  { id: 'menu_expenses',      label: 'مصروفات وإيرادات' },
+                  { id: 'menu_reports',       label: 'التقارير' },
+                  { id: 'menu_settings',      label: 'الإعدادات' },
+                  { id: 'menu_notifications', label: 'الإشعارات' },
+                  { id: 'menu_messages',      label: 'الرسائل' },
+                  { id: 'menu_plans',         label: 'الخطط' },
+                ];
+                const current: Record<string, boolean> = {};
+                menuItems.forEach(m => {
+                  const entry = permissionsMatrix[planKey]?.[m.id];
+                  current[m.id] = entry ? entry.view : true; // default: visible
+                });
+                const toggleMenu = (menuId: string) => {
+                  const newVisible = !current[menuId];
+                  const newMatrix = {
+                    ...permissionsMatrix,
+                    [planKey]: {
+                      ...(permissionsMatrix[planKey] || {}),
+                      [menuId]: { view: newVisible, create: newVisible, edit: newVisible, delete: newVisible, print: newVisible },
+                    },
+                  };
+                  setPermissionsMatrix(newMatrix);
+                  localStorage.setItem('smartAccountant_permissionsMatrix', JSON.stringify(newMatrix));
+                  notifyPermissionsChanged();
+                };
+                const allowAll = () => {
+                  const full = { view: true, create: true, edit: true, delete: true, print: true };
+                  const newMatrix = { ...permissionsMatrix, [planKey]: Object.fromEntries(menuItems.map(m => [m.id, full])) };
+                  setPermissionsMatrix(newMatrix);
+                  localStorage.setItem('smartAccountant_permissionsMatrix', JSON.stringify(newMatrix));
+                  notifyPermissionsChanged();
+                };
+                const blockAll = () => {
+                  const none = { view: false, create: false, edit: false, delete: false, print: false };
+                  const newMatrix = { ...permissionsMatrix, [planKey]: Object.fromEntries(menuItems.map(m => [m.id, none])) };
+                  setPermissionsMatrix(newMatrix);
+                  localStorage.setItem('smartAccountant_permissionsMatrix', JSON.stringify(newMatrix));
+                  notifyPermissionsChanged();
+                };
+                return (
+                  <div className="mt-4 p-5 rounded-xl border-2 border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <Key size={18} className="text-violet-600 dark:text-violet-400" />
+                        <h3 className="font-bold text-slate-800 dark:text-white">
+                          صلاحيات قوائم خطة: <span className="text-violet-600 dark:text-violet-300">{targetPlan.name}</span>
+                        </h3>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={allowAll} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 font-medium transition-colors">تفعيل الكل</button>
+                        <button onClick={blockAll} className="px-3 py-1.5 text-xs rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 font-medium transition-colors">تعطيل الكل</button>
+                        <button onClick={() => setExpandedPlanPermsId(null)} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><X size={16} /></button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                      القوائم المُفعَّلة ظاهرة لجميع مستخدمي هذه الخطة (ما لم تُتجاوَه بصلاحيات فردية على مستوى الحساب أو المستخدم)
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                      {menuItems.map(m => (
+                        <button
+                          key={m.id}
+                          onClick={() => toggleMenu(m.id)}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                            current[m.id]
+                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                              : 'border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
+                          }`}
+                        >
+                          {current[m.id] ? <Eye size={13} /> : <EyeOff size={13} />}
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              </>
             )}
           </div>
         )}
 
         {/* ==================== Server Settings Tab ==================== */}
-        {activeTab === 'server' && (
+        {activeTab === 'server' && isAdmin && (
           <div className="p-6 space-y-6">
             <div className="p-6 bg-gradient-to-r from-violet-600 to-purple-600 rounded-xl text-white">
               <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
@@ -2876,7 +4580,11 @@ const Settings: React.FC = () => {
             </div>
 
             {/* Login Screen Options */}
-            <div className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+            <div
+              className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800"
+              data-search-setting="login-screen-options"
+              data-search-keywords="خيارات شاشة الدخول تسجيل الدخول login screen controls"
+            >
               <div className="flex items-start gap-4">
                 <div className="p-3 bg-blue-100 dark:bg-blue-900/50 rounded-full text-blue-600 dark:text-blue-400">
                   <Lock size={24} />
@@ -2889,7 +4597,11 @@ const Settings: React.FC = () => {
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {/* Demo Login Toggle */}
-                    <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div
+                      className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
+                      data-search-setting="showDemoLogin"
+                      data-search-keywords="زر الدخول التجريبي demo login showDemoLogin"
+                    >
                       <div className="flex items-center gap-3">
                         <Sparkles className="text-emerald-500" size={20} />
                         <div>
@@ -2920,7 +4632,11 @@ const Settings: React.FC = () => {
                     </div>
 
                     {/* Admin Login Toggle */}
-                    <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div
+                      className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
+                      data-search-setting="showAdminLogin"
+                      data-search-keywords="زر دخول الأدمن admin login showAdminLogin"
+                    >
                       <div className="flex items-center gap-3">
                         <Shield className="text-rose-500" size={20} />
                         <div>
@@ -2951,7 +4667,11 @@ const Settings: React.FC = () => {
                     </div>
 
                     {/* Allow Registration Toggle */}
-                    <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div
+                      className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
+                      data-search-setting="allowUserRegistration"
+                      data-search-keywords="السماح بالتسجيل allow registration allowUserRegistration"
+                    >
                       <div className="flex items-center gap-3">
                         <UserCheck className="text-blue-500" size={20} />
                         <div>
@@ -2982,7 +4702,11 @@ const Settings: React.FC = () => {
                     </div>
 
                     {/* Forgot Password Toggle */}
-                    <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div
+                      className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
+                      data-search-setting="showForgotPassword"
+                      data-search-keywords="نسيت كلمة المرور forgot password showForgotPassword"
+                    >
                       <div className="flex items-center gap-3">
                         <Key className="text-amber-500" size={20} />
                         <div>
@@ -3013,7 +4737,11 @@ const Settings: React.FC = () => {
                     </div>
 
                     {/* Remember Me Toggle */}
-                    <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div
+                      className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
+                      data-search-setting="showRememberMe"
+                      data-search-keywords="تذكرني remember me showRememberMe"
+                    >
                       <div className="flex items-center gap-3">
                         <Clock className="text-purple-500" size={20} />
                         <div>
@@ -3047,6 +4775,262 @@ const Settings: React.FC = () => {
               </div>
             </div>
 
+            {/* Register Field Limits */}
+            <div
+              className="p-6 bg-cyan-50 dark:bg-cyan-900/20 rounded-xl border border-cyan-200 dark:border-cyan-800"
+              data-search-setting="register-field-limits"
+              data-search-keywords="حدود الحروف في شاشة التسجيل حدود حقول التسجيل register limits register max length username name company email password"
+            >
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-cyan-100 dark:bg-cyan-900/50 rounded-full text-cyan-600 dark:text-cyan-400">
+                  <User size={24} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-bold text-slate-800 dark:text-white">حدود الحروف في شاشة التسجيل</h3>
+                  <p className="text-slate-600 dark:text-slate-400 text-sm mt-1 mb-4">
+                    تحكم في الحد الأقصى لعدد الأحرف في حقول إنشاء الحساب. يُطبَّق مباشرة في شاشة التسجيل مع عداد الأحرف.
+                  </p>
+                  <p className="text-xs text-cyan-700 dark:text-cyan-300 mb-3">
+                    لتحسين الإدخال: عدّل الأرقام بحرية ثم اضغط زر حفظ كل الحدود مرة واحدة. أزرار + و - للتعديل السريع.
+                  </p>
+
+                  <div className="mb-4 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void saveAllRegisterLimits();
+                      }}
+                      disabled={isSavingRegisterLimits || !hasPendingRegisterLimitChanges}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-semibold hover:bg-cyan-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {isSavingRegisterLimits ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                      حفظ كل الحدود
+                    </button>
+                    <span className={`text-xs ${hasPendingRegisterLimitChanges ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                      {hasPendingRegisterLimitChanges ? 'يوجد تغييرات غير محفوظة' : 'كل التغييرات محفوظة'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700" data-search-setting="registerUsernameMaxLength">
+                      <div className="flex items-center gap-2 mb-2">
+                        <User size={16} className="text-cyan-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">اسم المستخدم</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={REGISTER_LIMIT_SETTING_CONFIG.registerUsernameMaxLength.min}
+                        max={REGISTER_LIMIT_SETTING_CONFIG.registerUsernameMaxLength.max}
+                        step={1}
+                        value={registerLimitDrafts.registerUsernameMaxLength}
+                        onChange={(e) => setRegisterLimitDraft('registerUsernameMaxLength', e.target.value)}
+                        onBlur={() => {
+                          normalizeRegisterLimitDraft('registerUsernameMaxLength');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            (e.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                        inputMode="numeric"
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerUsernameMaxLength', -1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          -
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerUsernameMaxLength', 1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: {REGISTER_LIMIT_SETTING_CONFIG.registerUsernameMaxLength.min} - {REGISTER_LIMIT_SETTING_CONFIG.registerUsernameMaxLength.max} حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700" data-search-setting="registerFullNameMaxLength">
+                      <div className="flex items-center gap-2 mb-2">
+                        <UserCheck size={16} className="text-cyan-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">الاسم الشخصي</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={REGISTER_LIMIT_SETTING_CONFIG.registerFullNameMaxLength.min}
+                        max={REGISTER_LIMIT_SETTING_CONFIG.registerFullNameMaxLength.max}
+                        step={1}
+                        value={registerLimitDrafts.registerFullNameMaxLength}
+                        onChange={(e) => setRegisterLimitDraft('registerFullNameMaxLength', e.target.value)}
+                        onBlur={() => {
+                          normalizeRegisterLimitDraft('registerFullNameMaxLength');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            (e.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                        inputMode="numeric"
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerFullNameMaxLength', -1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          -
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerFullNameMaxLength', 1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: {REGISTER_LIMIT_SETTING_CONFIG.registerFullNameMaxLength.min} - {REGISTER_LIMIT_SETTING_CONFIG.registerFullNameMaxLength.max} حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700" data-search-setting="registerCompanyNameMaxLength">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Building size={16} className="text-cyan-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">اسم الشركة / المتجر</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={REGISTER_LIMIT_SETTING_CONFIG.registerCompanyNameMaxLength.min}
+                        max={REGISTER_LIMIT_SETTING_CONFIG.registerCompanyNameMaxLength.max}
+                        step={1}
+                        value={registerLimitDrafts.registerCompanyNameMaxLength}
+                        onChange={(e) => setRegisterLimitDraft('registerCompanyNameMaxLength', e.target.value)}
+                        onBlur={() => {
+                          normalizeRegisterLimitDraft('registerCompanyNameMaxLength');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            (e.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                        inputMode="numeric"
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerCompanyNameMaxLength', -1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          -
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerCompanyNameMaxLength', 1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: {REGISTER_LIMIT_SETTING_CONFIG.registerCompanyNameMaxLength.min} - {REGISTER_LIMIT_SETTING_CONFIG.registerCompanyNameMaxLength.max} حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700" data-search-setting="registerEmailMaxLength">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Mail size={16} className="text-cyan-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">البريد الإلكتروني</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={REGISTER_LIMIT_SETTING_CONFIG.registerEmailMaxLength.min}
+                        max={REGISTER_LIMIT_SETTING_CONFIG.registerEmailMaxLength.max}
+                        step={1}
+                        value={registerLimitDrafts.registerEmailMaxLength}
+                        onChange={(e) => setRegisterLimitDraft('registerEmailMaxLength', e.target.value)}
+                        onBlur={() => {
+                          normalizeRegisterLimitDraft('registerEmailMaxLength');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            (e.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                        inputMode="numeric"
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerEmailMaxLength', -1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          -
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerEmailMaxLength', 1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: {REGISTER_LIMIT_SETTING_CONFIG.registerEmailMaxLength.min} - {REGISTER_LIMIT_SETTING_CONFIG.registerEmailMaxLength.max} حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 md:col-span-2" data-search-setting="registerPasswordMaxLength">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Lock size={16} className="text-cyan-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">كلمة المرور</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={REGISTER_LIMIT_SETTING_CONFIG.registerPasswordMaxLength.min}
+                        max={REGISTER_LIMIT_SETTING_CONFIG.registerPasswordMaxLength.max}
+                        step={1}
+                        value={registerLimitDrafts.registerPasswordMaxLength}
+                        onChange={(e) => setRegisterLimitDraft('registerPasswordMaxLength', e.target.value)}
+                        onBlur={() => {
+                          normalizeRegisterLimitDraft('registerPasswordMaxLength');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            (e.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                        inputMode="numeric"
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerPasswordMaxLength', -1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          -
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => stepRegisterLimitDraft('registerPasswordMaxLength', 1)}
+                          className="px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: {REGISTER_LIMIT_SETTING_CONFIG.registerPasswordMaxLength.min} - {REGISTER_LIMIT_SETTING_CONFIG.registerPasswordMaxLength.max} حرف</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Security Settings */}
             <div className="p-6 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
               <div className="flex items-start gap-4">
@@ -3061,7 +5045,11 @@ const Settings: React.FC = () => {
                   
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {/* Max Login Attempts */}
-                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div
+                      className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
+                      data-search-setting="maxLoginAttempts"
+                      data-search-keywords="محاولات الدخول الفاشلة maxLoginAttempts failed login attempts"
+                    >
                       <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                         محاولات الدخول الفاشلة
                       </label>
@@ -4200,6 +6188,231 @@ const Settings: React.FC = () => {
               </div>
             </div>
 
+            {/* ==================== Customer Fields Length Limits ==================== */}
+            <div className="p-6 bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-200 dark:border-rose-800">
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-rose-100 dark:bg-rose-900/50 rounded-full text-rose-600 dark:text-rose-400">
+                  <FileText size={24} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-bold text-slate-800 dark:text-white">حدود الحروف لحقول العملاء</h3>
+                  <p className="text-slate-600 dark:text-slate-400 text-sm mt-1 mb-4">
+                    تحكم بعدد الحروف المسموح لكل حقل في شاشة العملاء، مع عداد تنازلي يظهر للمستخدم أثناء الإدخال.
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center gap-2 mb-2">
+                        <User size={16} className="text-rose-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">اسم العميل</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={20}
+                        max={200}
+                        value={(permissions as any).customerNameMaxLength ?? 120}
+                        onChange={async (e) => {
+                          const value = Math.min(200, Math.max(20, parseInt(e.target.value) || 120));
+                          try {
+                            await systemSettingsApi.update('customerNameMaxLength', value.toString(), 'int');
+                            togglePermission('customerNameMaxLength' as any, value);
+                            notify('تم تحديث حد اسم العميل ✓', 'success');
+                          } catch {
+                            togglePermission('customerNameMaxLength' as any, value);
+                            notify('تم تحديث حد اسم العميل (محلياً)', 'info');
+                          }
+                        }}
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: 20 - 200 حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center gap-2 mb-2">
+                        <MapPin size={16} className="text-rose-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">العنوان + التفاصيل الإضافية</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={40}
+                        max={400}
+                        value={(permissions as any).customerAddressMaxLength ?? 220}
+                        onChange={async (e) => {
+                          const value = Math.min(400, Math.max(40, parseInt(e.target.value) || 220));
+                          try {
+                            await systemSettingsApi.update('customerAddressMaxLength', value.toString(), 'int');
+                            togglePermission('customerAddressMaxLength' as any, value);
+                            notify('تم تحديث حد العنوان ✓', 'success');
+                          } catch {
+                            togglePermission('customerAddressMaxLength' as any, value);
+                            notify('تم تحديث حد العنوان (محلياً)', 'info');
+                          }
+                        }}
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: 40 - 400 حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center gap-2 mb-2">
+                        <FileText size={16} className="text-rose-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">الملاحظات</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={50}
+                        max={1000}
+                        value={(permissions as any).customerNotesMaxLength ?? 300}
+                        onChange={async (e) => {
+                          const value = Math.min(1000, Math.max(50, parseInt(e.target.value) || 300));
+                          try {
+                            await systemSettingsApi.update('customerNotesMaxLength', value.toString(), 'int');
+                            togglePermission('customerNotesMaxLength' as any, value);
+                            notify('تم تحديث حد الملاحظات ✓', 'success');
+                          } catch {
+                            togglePermission('customerNotesMaxLength' as any, value);
+                            notify('تم تحديث حد الملاحظات (محلياً)', 'info');
+                          }
+                        }}
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: 50 - 1000 حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Phone size={16} className="text-rose-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">الهاتف</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={8}
+                        max={30}
+                        value={(permissions as any).customerPhoneMaxLength ?? 20}
+                        onChange={async (e) => {
+                          const value = Math.min(30, Math.max(8, parseInt(e.target.value) || 20));
+                          try {
+                            await systemSettingsApi.update('customerPhoneMaxLength', value.toString(), 'int');
+                            togglePermission('customerPhoneMaxLength' as any, value);
+                            notify('تم تحديث حد الهاتف ✓', 'success');
+                          } catch {
+                            togglePermission('customerPhoneMaxLength' as any, value);
+                            notify('تم تحديث حد الهاتف (محلياً)', 'info');
+                          }
+                        }}
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: 8 - 30 حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 md:col-span-2">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Mail size={16} className="text-rose-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">البريد الإلكتروني</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={30}
+                        max={200}
+                        value={(permissions as any).customerEmailMaxLength ?? 120}
+                        onChange={async (e) => {
+                          const value = Math.min(200, Math.max(30, parseInt(e.target.value) || 120));
+                          try {
+                            await systemSettingsApi.update('customerEmailMaxLength', value.toString(), 'int');
+                            togglePermission('customerEmailMaxLength' as any, value);
+                            notify('تم تحديث حد البريد الإلكتروني ✓', 'success');
+                          } catch {
+                            togglePermission('customerEmailMaxLength' as any, value);
+                            notify('تم تحديث حد البريد الإلكتروني (محلياً)', 'info');
+                          }
+                        }}
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: 30 - 200 حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center gap-2 mb-2">
+                        <FileText size={16} className="text-rose-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">اسم المنتج</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={20}
+                        max={200}
+                        value={(permissions as any).productNameMaxLength ?? 120}
+                        onChange={async (e) => {
+                          const value = Math.min(200, Math.max(20, parseInt(e.target.value) || 120));
+                          try {
+                            await systemSettingsApi.update('productNameMaxLength', value.toString(), 'int');
+                            togglePermission('productNameMaxLength' as any, value);
+                            notify('تم تحديث حد اسم المنتج ✓', 'success');
+                          } catch {
+                            togglePermission('productNameMaxLength' as any, value);
+                            notify('تم تحديث حد اسم المنتج (محلياً)', 'info');
+                          }
+                        }}
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: 20 - 200 حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center gap-2 mb-2">
+                        <FileText size={16} className="text-rose-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">ملاحظات المنتج</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={20}
+                        max={500}
+                        value={(permissions as any).productNotesMaxLength ?? 300}
+                        onChange={async (e) => {
+                          const value = Math.min(500, Math.max(20, parseInt(e.target.value) || 300));
+                          try {
+                            await systemSettingsApi.update('productNotesMaxLength', value.toString(), 'int');
+                            togglePermission('productNotesMaxLength' as any, value);
+                            notify('تم تحديث حد ملاحظات المنتج ✓', 'success');
+                          } catch {
+                            togglePermission('productNotesMaxLength' as any, value);
+                            notify('تم تحديث حد ملاحظات المنتج (محلياً)', 'info');
+                          }
+                        }}
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: 20 - 500 حرف</p>
+                    </div>
+
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 md:col-span-2">
+                      <div className="flex items-center gap-2 mb-2">
+                        <FileText size={16} className="text-rose-500" />
+                        <label className="text-sm font-medium text-slate-800 dark:text-white">ملاحظات الفاتورة</label>
+                      </div>
+                      <input
+                        type="number"
+                        min={20}
+                        max={1000}
+                        value={(permissions as any).invoiceNotesMaxLength ?? 300}
+                        onChange={async (e) => {
+                          const value = Math.min(1000, Math.max(20, parseInt(e.target.value) || 300));
+                          try {
+                            await systemSettingsApi.update('invoiceNotesMaxLength', value.toString(), 'int');
+                            togglePermission('invoiceNotesMaxLength' as any, value);
+                            notify('تم تحديث حد ملاحظات الفاتورة ✓', 'success');
+                          } catch {
+                            togglePermission('invoiceNotesMaxLength' as any, value);
+                            notify('تم تحديث حد ملاحظات الفاتورة (محلياً)', 'info');
+                          }
+                        }}
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm"
+                      />
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">المدى المسموح: 20 - 1000 حرف</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* ==================== Offline Mode Settings ==================== */}
             <div className="p-6 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
               <div className="flex items-start gap-4">
@@ -4210,14 +6423,29 @@ const Settings: React.FC = () => {
                   <div>
                     <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
                       وضع عدم الاتصال (Offline Mode)
-                      <span className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-400 px-2 py-0.5 rounded-full">
-                        PRO
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${offlineAllowedByPlan ? 'bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-400' : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'}`}>
+                        {offlineAllowedByPlan ? 'متاح بالباقة' : 'غير متاح بالباقة'}
                       </span>
                     </h3>
                     <p className="text-slate-600 dark:text-slate-400 text-sm mt-1">
                       تفعيل العمل بدون اتصال بالإنترنت مع مزامنة البيانات تلقائياً عند عودة الاتصال
                     </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      هذا الإعداد على مستوى الحساب ويُطبق على جميع المستخدمين داخل نفس الحساب.
+                    </p>
                   </div>
+
+                  {!offlineAllowedByPlan && (
+                    <div className="p-3 bg-rose-50 dark:bg-rose-900/20 rounded-lg border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+                      باقتك الحالية لا تتضمن العمل بدون اتصال. يلزم ترقية الباقة لتفعيل الميزة.
+                    </div>
+                  )}
+
+                  {!canManageOfflineSettings && (
+                    <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
+                      يمكنك عرض الإعدادات فقط. تعديل إعدادات Offline متاح للأدمن أو من لديه صلاحية إدارة الإعدادات.
+                    </div>
+                  )}
 
                   {/* تفعيل/تعطيل Offline Mode */}
                   <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg">
@@ -4228,14 +6456,10 @@ const Settings: React.FC = () => {
                     <button
                       onClick={async () => {
                         const newValue = !(permissions as any).allowOfflineMode;
-                        try {
-                          await systemSettingsApi.update('allowOfflineMode', newValue.toString(), 'bool');
-                          togglePermission('allowOfflineMode' as any);
-                        } catch {
-                          togglePermission('allowOfflineMode' as any);
-                        }
+                        await updateOfflineSetting('allowOfflineMode', newValue, 'bool');
                       }}
-                      className={`relative w-14 h-7 rounded-full transition-colors ${
+                      disabled={!offlineAllowedByPlan || !canManageOfflineSettings}
+                      className={`relative w-14 h-7 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                         (permissions as any).allowOfflineMode !== false ? 'bg-purple-600' : 'bg-slate-300 dark:bg-slate-600'
                       }`}
                     >
@@ -4246,7 +6470,7 @@ const Settings: React.FC = () => {
                   </div>
 
                   {/* إعدادات تفصيلية */}
-                  {(permissions as any).allowOfflineMode !== false && (
+                  {offlineEffectiveEnabled && (
                     <div className="space-y-3 border-t border-purple-200 dark:border-purple-800 pt-4">
                       {/* صلاحيات الإنشاء */}
                       <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg">
@@ -4255,8 +6479,9 @@ const Settings: React.FC = () => {
                           <span className="text-sm text-slate-700 dark:text-slate-300">السماح بالإنشاء offline</span>
                         </div>
                         <button
-                          onClick={() => togglePermission('allowOfflineCreate' as any)}
-                          className={`relative w-12 h-6 rounded-full transition-colors ${
+                          onClick={() => updateOfflineSetting('allowOfflineCreate', (permissions as any).allowOfflineCreate === false, 'bool')}
+                          disabled={!canManageOfflineSettings}
+                          className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                             (permissions as any).allowOfflineCreate !== false ? 'bg-green-500' : 'bg-slate-300 dark:bg-slate-600'
                           }`}
                         >
@@ -4273,8 +6498,9 @@ const Settings: React.FC = () => {
                           <span className="text-sm text-slate-700 dark:text-slate-300">السماح بالتعديل offline</span>
                         </div>
                         <button
-                          onClick={() => togglePermission('allowOfflineEdit' as any)}
-                          className={`relative w-12 h-6 rounded-full transition-colors ${
+                          onClick={() => updateOfflineSetting('allowOfflineEdit', (permissions as any).allowOfflineEdit === false, 'bool')}
+                          disabled={!canManageOfflineSettings}
+                          className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                             (permissions as any).allowOfflineEdit !== false ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
                           }`}
                         >
@@ -4292,8 +6518,9 @@ const Settings: React.FC = () => {
                           <span className="text-xs text-red-500">(غير مستحسن)</span>
                         </div>
                         <button
-                          onClick={() => togglePermission('allowOfflineDelete' as any)}
-                          className={`relative w-12 h-6 rounded-full transition-colors ${
+                          onClick={() => updateOfflineSetting('allowOfflineDelete', !(permissions as any).allowOfflineDelete, 'bool')}
+                          disabled={!canManageOfflineSettings}
+                          className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                             (permissions as any).allowOfflineDelete ? 'bg-red-500' : 'bg-slate-300 dark:bg-slate-600'
                           }`}
                         >
@@ -4310,8 +6537,9 @@ const Settings: React.FC = () => {
                           <span className="text-sm text-slate-700 dark:text-slate-300">إظهار مؤشر حالة الاتصال</span>
                         </div>
                         <button
-                          onClick={() => togglePermission('showOfflineIndicator' as any)}
-                          className={`relative w-12 h-6 rounded-full transition-colors ${
+                          onClick={() => updateOfflineSetting('showOfflineIndicator', (permissions as any).showOfflineIndicator === false, 'bool')}
+                          disabled={!canManageOfflineSettings}
+                          className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                             (permissions as any).showOfflineIndicator !== false ? 'bg-blue-500' : 'bg-slate-300 dark:bg-slate-600'
                           }`}
                         >
@@ -4328,8 +6556,9 @@ const Settings: React.FC = () => {
                           <span className="text-sm text-slate-700 dark:text-slate-300">مزامنة تلقائية عند عودة الاتصال</span>
                         </div>
                         <button
-                          onClick={() => togglePermission('autoSyncOnReconnect' as any)}
-                          className={`relative w-12 h-6 rounded-full transition-colors ${
+                          onClick={() => updateOfflineSetting('autoSyncOnReconnect', (permissions as any).autoSyncOnReconnect === false, 'bool')}
+                          disabled={!canManageOfflineSettings}
+                          className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                             (permissions as any).autoSyncOnReconnect !== false ? 'bg-cyan-500' : 'bg-slate-300 dark:bg-slate-600'
                           }`}
                         >
@@ -4347,7 +6576,8 @@ const Settings: React.FC = () => {
                           </label>
                           <select
                             value={(permissions as any).maxPendingChanges || 100}
-                            onChange={(e) => togglePermission('maxPendingChanges' as any, parseInt(e.target.value))}
+                            onChange={(e) => updateOfflineSetting('maxPendingChanges', parseInt(e.target.value), 'int')}
+                            disabled={!canManageOfflineSettings}
                             className="w-full p-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
                           >
                             <option value={50}>50 تغيير</option>
@@ -4362,7 +6592,8 @@ const Settings: React.FC = () => {
                           </label>
                           <select
                             value={(permissions as any).offlineDataRetentionDays || 30}
-                            onChange={(e) => togglePermission('offlineDataRetentionDays' as any, parseInt(e.target.value))}
+                            onChange={(e) => updateOfflineSetting('offlineDataRetentionDays', parseInt(e.target.value), 'int')}
+                            disabled={!canManageOfflineSettings}
                             className="w-full p-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
                           >
                             <option value={7}>7 أيام</option>
@@ -4381,7 +6612,8 @@ const Settings: React.FC = () => {
                         </label>
                         <select
                           value={(permissions as any).syncIntervalSeconds || 30}
-                          onChange={(e) => togglePermission('syncIntervalSeconds' as any, parseInt(e.target.value))}
+                          onChange={(e) => updateOfflineSetting('syncIntervalSeconds', parseInt(e.target.value), 'int')}
+                          disabled={!canManageOfflineSettings}
                           className="w-full p-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
                         >
                           <option value={15}>كل 15 ثانية</option>
@@ -4390,6 +6622,131 @@ const Settings: React.FC = () => {
                           <option value={120}>كل دقيقتين</option>
                           <option value={300}>كل 5 دقائق</option>
                         </select>
+                      </div>
+
+                      {/* لوحة إدارة طابور المزامنة */}
+                      <div className="p-4 bg-white dark:bg-slate-800 rounded-lg border border-purple-100 dark:border-purple-800/60 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-800 dark:text-white">لوحة طابور المزامنة (Outbox)</h4>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">إدارة العناصر المعلقة/الفاشلة والتعارضات</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <span className={`px-2 py-1 rounded-full ${isOnline ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'}`}>
+                              {isOnline ? 'متصل' : 'غير متصل'}
+                            </span>
+                            <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                              pending: {queueItems.filter(i => i.status === 'pending').length}
+                            </span>
+                            <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                              failed: {queueItems.filter(i => i.status === 'failed').length}
+                            </span>
+                            <span className="px-2 py-1 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
+                              conflicts: {queueItems.filter(i => i.errorType === 'conflict').length}
+                            </span>
+                            <span className="px-2 py-1 rounded-full bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+                              syncing: {syncState.isSyncing ? 'نعم' : 'لا'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={handleForceSyncNow}
+                            disabled={!isOnline || queueActionLoading !== null}
+                            className="px-3 py-1.5 text-xs rounded-md bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            مزامنة الآن
+                          </button>
+                          <button
+                            onClick={handleRetryFailed}
+                            disabled={queueActionLoading !== null}
+                            className="px-3 py-1.5 text-xs rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            إعادة محاولة الفاشلة
+                          </button>
+                          <button
+                            onClick={handleDiscardConflicts}
+                            disabled={queueActionLoading !== null}
+                            className="px-3 py-1.5 text-xs rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            حذف المتعارضة
+                          </button>
+                          <button
+                            onClick={() => {
+                              window.dispatchEvent(new Event('autoRefreshData'));
+                              notify('تم طلب تحديث البيانات من الخادم', 'info');
+                            }}
+                            disabled={queueActionLoading !== null}
+                            className="px-3 py-1.5 text-xs rounded-md bg-slate-600 text-white hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            تحديث من الخادم
+                          </button>
+                        </div>
+
+                        {queueItems.length === 0 ? (
+                          <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/30 rounded-md p-3">
+                            لا توجد عناصر في طابور المزامنة حالياً.
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                                  <th className="text-right py-2 px-2">الكيان</th>
+                                  <th className="text-right py-2 px-2">العملية</th>
+                                  <th className="text-right py-2 px-2">الحالة</th>
+                                  <th className="text-right py-2 px-2">الخطأ</th>
+                                  <th className="text-right py-2 px-2">المحاولات</th>
+                                  <th className="text-right py-2 px-2">الوقت</th>
+                                  <th className="text-right py-2 px-2">إجراءات</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {queueItems.slice(0, 20).map((item) => (
+                                  <tr key={item.id} className="border-b border-slate-100 dark:border-slate-800">
+                                    <td className="py-2 px-2 font-medium text-slate-700 dark:text-slate-200">{item.entity}</td>
+                                    <td className="py-2 px-2 text-slate-600 dark:text-slate-300">{item.type}</td>
+                                    <td className="py-2 px-2">
+                                      <span className={`px-2 py-0.5 rounded-full ${
+                                        item.status === 'failed'
+                                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                                          : item.status === 'syncing'
+                                          ? 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300'
+                                          : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+                                      }`}>
+                                        {item.status}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-2 text-rose-600 dark:text-rose-300 max-w-[260px] truncate" title={item.lastError || ''}>
+                                      {item.errorType === 'conflict' ? 'تعارض بيانات' : (item.lastError || '-')}
+                                    </td>
+                                    <td className="py-2 px-2 text-slate-600 dark:text-slate-300">{item.retryCount}/{item.maxRetries}</td>
+                                    <td className="py-2 px-2 text-slate-500 dark:text-slate-400">{formatDateTime(new Date(item.timestamp).toISOString())}</td>
+                                    <td className="py-2 px-2">
+                                      <div className="flex items-center gap-1">
+                                        <button
+                                          onClick={() => handleRetryItem(item.id)}
+                                          disabled={queueActionLoading !== null}
+                                          className="px-2 py-1 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300 disabled:opacity-50"
+                                        >
+                                          Retry
+                                        </button>
+                                        <button
+                                          onClick={() => handleDiscardItem(item.id)}
+                                          disabled={queueActionLoading !== null}
+                                          className="px-2 py-1 rounded bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-300 disabled:opacity-50"
+                                        >
+                                          Discard
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -4688,7 +7045,7 @@ const Settings: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                     {filteredActivityLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                      <tr key={log.id} data-search-log-id={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                         <td className="px-4 py-3 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                           {formatDateTime(log.createdAt)}
                         </td>
@@ -4727,7 +7084,7 @@ const Settings: React.FC = () => {
                   </div>
                 )}
                 {filteredActivityLogs.map((log) => (
-                  <div key={log.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 hover:shadow-lg transition-all">
+                  <div key={log.id} data-search-log-id={log.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 hover:shadow-lg transition-all">
                     <div className="flex justify-between items-start mb-3">
                       <div className="p-2">
                         {log.action === 'Login' ? <LogIn size={20} className="text-green-600 dark:text-green-400" /> :
@@ -5282,7 +7639,7 @@ const Settings: React.FC = () => {
                 {/* جدول الصلاحيات للتعديل الجماعي */}
                 <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                   {/* Grid Header */}
-                  <div className="grid grid-cols-5 bg-slate-100 dark:bg-slate-700 text-xs font-medium">
+                  <div className="grid grid-cols-6 bg-slate-100 dark:bg-slate-700 text-xs font-medium">
                     <div className="col-span-1 px-4 py-3 text-slate-600 dark:text-slate-300">المكون</div>
                     <div className="px-2 py-3 text-center text-slate-600 dark:text-slate-300">
                       <div className="flex flex-col items-center gap-1">
@@ -5306,6 +7663,12 @@ const Settings: React.FC = () => {
                       <div className="flex flex-col items-center gap-1">
                         <Trash2 size={16} className="text-rose-500" />
                         <span>حذف</span>
+                      </div>
+                    </div>
+                    <div className="px-2 py-3 text-center text-slate-600 dark:text-slate-300">
+                      <div className="flex flex-col items-center gap-1">
+                        <Printer size={16} className="text-indigo-500" />
+                        <span>طباعة</span>
                       </div>
                     </div>
                   </div>
@@ -5335,21 +7698,21 @@ const Settings: React.FC = () => {
                             const firstKey = selectedPermRole === 'all_roles' ? `role_${roles[0]?.id}` 
                               : selectedPermRole === 'all_users' ? `user_${users[0]?.id}` 
                               : `account_${accounts[0]?.id}`;
-                            const perms = permissionsMatrix[firstKey]?.[module.id] || { view: false, create: false, edit: false, delete: false };
-                            const allChecked = perms.view && perms.create && perms.edit && perms.delete;
+                            const perms = permissionsMatrix[firstKey]?.[module.id] || { view: false, create: false, edit: false, delete: false, print: false };
+                            const allChecked = perms.view && perms.create && perms.edit && perms.delete && perms.print;
                             
                             return (
                               <div 
                                 key={module.id} 
-                                className={`grid grid-cols-5 items-center border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors ${idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}`}
+                                className={`grid grid-cols-6 items-center border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors ${idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}`}
                               >
                                 {/* Module Name with Quick Toggle */}
                                 <div className="col-span-1 px-4 py-2.5 flex items-center gap-2">
                                   <button
                                     onClick={() => {
                                       const newPerms = allChecked 
-                                        ? { view: false, create: false, edit: false, delete: false }
-                                        : { view: true, create: true, edit: true, delete: true };
+                                        ? { view: false, create: false, edit: false, delete: false, print: false }
+                                        : { view: true, create: true, edit: true, delete: true, print: true };
                                       
                                       // تطبيق على جميع العناصر
                                       const newMatrix = { ...permissionsMatrix };
@@ -5383,8 +7746,8 @@ const Settings: React.FC = () => {
                                 </div>
                                 
                                 {/* Permission Toggles */}
-                                {(['view', 'create', 'edit', 'delete'] as const).map(perm => {
-                                  const permLabels = { view: 'عرض', create: 'إضافة', edit: 'تعديل', delete: 'حذف' };
+                                {(['view', 'create', 'edit', 'delete', 'print'] as const).map(perm => {
+                                  const permLabels = { view: 'عرض', create: 'إضافة', edit: 'تعديل', delete: 'حذف', print: 'طباعة' };
                                   return (
                                   <div key={perm} className="px-2 py-2.5 flex justify-center">
                                     <button
@@ -5399,7 +7762,7 @@ const Settings: React.FC = () => {
                                             newMatrix[key] = { 
                                               ...(newMatrix[key] || {}), 
                                               [module.id]: { 
-                                                ...(newMatrix[key]?.[module.id] || { view: false, create: false, edit: false, delete: false }),
+                                                ...(newMatrix[key]?.[module.id] || { view: false, create: false, edit: false, delete: false, print: false }),
                                                 [perm]: newValue 
                                               } 
                                             };
@@ -5410,7 +7773,7 @@ const Settings: React.FC = () => {
                                             newMatrix[key] = { 
                                               ...(newMatrix[key] || {}), 
                                               [module.id]: { 
-                                                ...(newMatrix[key]?.[module.id] || { view: false, create: false, edit: false, delete: false }),
+                                                ...(newMatrix[key]?.[module.id] || { view: false, create: false, edit: false, delete: false, print: false }),
                                                 [perm]: newValue 
                                               } 
                                             };
@@ -5421,7 +7784,7 @@ const Settings: React.FC = () => {
                                             newMatrix[key] = { 
                                               ...(newMatrix[key] || {}), 
                                               [module.id]: { 
-                                                ...(newMatrix[key]?.[module.id] || { view: false, create: false, edit: false, delete: false }),
+                                                ...(newMatrix[key]?.[module.id] || { view: false, create: false, edit: false, delete: false, print: false }),
                                                 [perm]: newValue 
                                               } 
                                             };
@@ -5435,7 +7798,8 @@ const Settings: React.FC = () => {
                                           ? perm === 'view' ? 'bg-blue-500 text-white shadow-sm shadow-blue-200 dark:shadow-none'
                                           : perm === 'create' ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-200 dark:shadow-none'
                                           : perm === 'edit' ? 'bg-amber-500 text-white shadow-sm shadow-amber-200 dark:shadow-none'
-                                          : 'bg-rose-500 text-white shadow-sm shadow-rose-200 dark:shadow-none'
+                                          : perm === 'delete' ? 'bg-rose-500 text-white shadow-sm shadow-rose-200 dark:shadow-none'
+                                          : 'bg-indigo-500 text-white shadow-sm shadow-indigo-200 dark:shadow-none'
                                           : 'bg-slate-100 dark:bg-slate-600 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-500'
                                       }`}
                                     >
@@ -5642,6 +8006,84 @@ const Settings: React.FC = () => {
                   className="w-full p-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
                   placeholder="المملكة العربية السعودية - الرياض"
                 />
+
+                <div className="mt-3 p-3 bg-slate-50 dark:bg-slate-700/40 border border-slate-200 dark:border-slate-600 rounded-lg space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={openAccountLocationOnMap}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                    >
+                      <MapPin size={13} />
+                      فتح الخريطة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={detectAccountLocation}
+                      disabled={detectingAccountLocation}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-70"
+                    >
+                      {detectingAccountLocation ? <Loader2 size={13} className="animate-spin" /> : <MapPin size={13} />}
+                      موقعي الحالي
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAccountFormData({ ...accountFormData, latitude: '', longitude: '' })}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-500 transition-colors"
+                    >
+                      مسح الإحداثيات
+                    </button>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">خط العرض (Latitude)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        dir="ltr"
+                        value={accountFormData.latitude}
+                        onChange={(e) => setAccountFormData({ ...accountFormData, latitude: e.target.value })}
+                        placeholder="مثال: 24.713552"
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">خط الطول (Longitude)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        dir="ltr"
+                        value={accountFormData.longitude}
+                        onChange={(e) => setAccountFormData({ ...accountFormData, longitude: e.target.value })}
+                        placeholder="مثال: 46.675297"
+                        className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <CoordinateMapPicker
+                    latitude={accountFormData.latitude}
+                    longitude={accountFormData.longitude}
+                    label={accountFormData.name || 'موقع الشركة'}
+                    onChange={(nextLatitude, nextLongitude) =>
+                      setAccountFormData({
+                        ...accountFormData,
+                        latitude: nextLatitude,
+                        longitude: nextLongitude,
+                      })
+                    }
+                  />
+
+                  {!accountCoordinatesPreview.isValid && (
+                    <p className="text-xs text-rose-600 dark:text-rose-400">{accountCoordinatesPreview.message}</p>
+                  )}
+                  {accountCoordinatesPreview.isValid && accountCoordinatesPreview.hasCoordinates && (
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400" dir="ltr">
+                      GPS({accountCoordinatesPreview.latitude}, {accountCoordinatesPreview.longitude})
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -6067,6 +8509,7 @@ const Settings: React.FC = () => {
                     { key: 'hasCustomInvoices', label: 'تخصيص الفواتير' },
                     { key: 'hasMultiCurrency', label: 'العملات المتعددة' },
                     { key: 'hasApiAccess', label: 'الوصول لـ API' },
+                    { key: 'hasOfflineMode', label: 'العمل بدون اتصال' },
                     { key: 'hasWhiteLabel', label: 'تخصيص كامل (White Label)' },
                   ].map(feature => (
                     <label key={feature.key} className="flex items-center gap-2 cursor-pointer">
@@ -6141,7 +8584,16 @@ const Settings: React.FC = () => {
                   </label>
                   <select
                     value={selectedAccountForUser}
-                    onChange={(e) => setSelectedAccountForUser(parseInt(e.target.value))}
+                    onChange={(e) => {
+                      const nextAccountId = parseInt(e.target.value, 10) || 1;
+                      setSelectedAccountForUser(nextAccountId);
+                      setUserFormData(prev => {
+                        if (prev.roleIds.length === 0) {
+                          return prev;
+                        }
+                        return { ...prev, roleIds: [] };
+                      });
+                    }}
                     className="w-full p-2.5 border border-blue-300 dark:border-blue-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
                   >
                     {accounts.map(acc => (
@@ -6267,55 +8719,86 @@ const Settings: React.FC = () => {
                 <label className="block text-sm text-slate-600 dark:text-slate-400 mb-2">
                   الأدوار
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  {roles.map(role => (
-                    <label
-                      key={role.id}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
-                        userFormData.roleIds.includes(role.id)
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-slate-200 dark:border-slate-600 hover:border-primary/50'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={userFormData.roleIds.includes(role.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setUserFormData({
-                              ...userFormData,
-                              roleIds: [...userFormData.roleIds, role.id]
-                            });
-                          } else {
-                            setUserFormData({
-                              ...userFormData,
-                              roleIds: userFormData.roleIds.filter(id => id !== role.id)
-                            });
-                          }
+                {rolesLoading ? (
+                  <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 text-sm text-slate-600 dark:text-slate-300 flex items-center gap-2">
+                    <Loader2 size={16} className="animate-spin" />
+                    جاري تحميل الأدوار...
+                  </div>
+                ) : roles.length === 0 ? (
+                  <div className="p-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 text-sm text-amber-700 dark:text-amber-400 space-y-2">
+                    <p>لا توجد أدوار متاحة للحساب المحدد حالياً.</p>
+                    {!editingUser && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleCreateDefaultRoleForSelectedAccount();
                         }}
-                        className="hidden"
-                      />
-                      <span className="text-sm">{role.name}</span>
-                    </label>
-                  ))}
-                </div>
+                        disabled={creatingDefaultRole}
+                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {creatingDefaultRole ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                        إنشاء دور افتراضي محدود
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {roles.map(role => (
+                      <label
+                        key={role.id}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                          userFormData.roleIds.includes(role.id)
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-slate-200 dark:border-slate-600 hover:border-primary/50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={userFormData.roleIds.includes(role.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setUserFormData({
+                                ...userFormData,
+                                roleIds: [...userFormData.roleIds, role.id]
+                              });
+                            } else {
+                              setUserFormData({
+                                ...userFormData,
+                                roleIds: userFormData.roleIds.filter(id => id !== role.id)
+                              });
+                            }
+                          }}
+                          className="hidden"
+                        />
+                        <span className="text-sm">{role.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Super Admin */}
-              <label className="flex items-center gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={userFormData.isSuperAdmin}
-                  onChange={(e) => setUserFormData({ ...userFormData, isSuperAdmin: e.target.checked })}
-                  className="w-5 h-5 text-amber-600"
-                />
-                <div>
-                  <p className="font-medium text-amber-800 dark:text-amber-400">مدير النظام</p>
-                  <p className="text-sm text-amber-600 dark:text-amber-500">
-                    صلاحيات كاملة على جميع الأقسام
-                  </p>
+              {isAdmin && (
+                <label className="flex items-center gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={userFormData.isSuperAdmin}
+                    onChange={(e) => setUserFormData({ ...userFormData, isSuperAdmin: e.target.checked })}
+                    className="w-5 h-5 text-amber-600"
+                  />
+                  <div>
+                    <p className="font-medium text-amber-800 dark:text-amber-400">مدير النظام</p>
+                    <p className="text-sm text-amber-600 dark:text-amber-500">
+                      صلاحيات كاملة على جميع الأقسام
+                    </p>
+                  </div>
+                </label>
+              )}
+
+              {!userFormData.isSuperAdmin && userFormData.roleIds.length === 0 && (
+                <div className="p-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 text-sm text-amber-700 dark:text-amber-400">
+                  اختر دوراً واحداً على الأقل حتى لا يحصل المستخدم على وصول واسع غير مقصود.
                 </div>
-              </label>
+              )}
             </div>
 
             <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex gap-3">
@@ -6829,7 +9312,7 @@ const Settings: React.FC = () => {
                               </thead>
                               <tbody>
                                 {categoryModules.map(mod => {
-                                  const modPerm = entityPerms[mod.id] || { view: true, create: true, edit: true, delete: true };
+                                  const modPerm = entityPerms[mod.id] || { view: true, create: true, edit: true, delete: true, print: true };
                                   return (
                                     <tr key={mod.id} className="border-t border-slate-200 dark:border-slate-600">
                                       <td className="p-2 text-slate-700 dark:text-slate-300">{mod.name}</td>

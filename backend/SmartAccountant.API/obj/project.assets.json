@@ -1219,6 +1219,15 @@
           }
         }
       },
+      "QRCoder/1.5.0": {
+        "type": "package",
+        "compile": {
+          "lib/net6.0/QRCoder.dll": {}
+        },
+        "runtime": {
+          "lib/net6.0/QRCoder.dll": {}
+        }
+      },
       "System.ClientModel/1.5.1": {
         "type": "package",
         "dependencies": {
@@ -3403,6 +3412,27 @@
         "packageIcon.png"
       ]
     },
+    "QRCoder/1.5.0": {
+      "sha512": "z1xaJ1BsYdSstpuKWgT3ND9Ryt7gd9RdBvcLemP3Dz8CrPPeuyhn2KlD8J1x1V4OhuAsAFcZRmxB7vte7CQkfQ==",
+      "type": "package",
+      "path": "qrcoder/1.5.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net35/QRCoder.dll",
+        "lib/net40/QRCoder.dll",
+        "lib/net5.0-windows7.0/QRCoder.dll",
+        "lib/net5.0/QRCoder.dll",
+        "lib/net6.0-windows7.0/QRCoder.dll",
+        "lib/net6.0/QRCoder.dll",
+        "lib/netstandard1.3/QRCoder.dll",
+        "lib/netstandard2.0/QRCoder.dll",
+        "nuget-icon.png",
+        "nuget-readme.md",
+        "qrcoder.1.5.0.nupkg.sha512",
+        "qrcoder.nuspec"
+      ]
+    },
     "System.ClientModel/1.5.1": {
       "sha512": "k2jKSO0X45IqhVOT9iQB4xralNN9foRQsRvXBTyRpAVxyzCJlG895T9qYrQWbcJ6OQXxOouJQ37x5nZH5XKK+A==",
       "type": "package",
@@ -3907,6 +3937,7 @@
       "Microsoft.EntityFrameworkCore.Design >= 10.0.1",
       "Microsoft.EntityFrameworkCore.InMemory >= 10.0.1",
       "Microsoft.EntityFrameworkCore.SqlServer >= 10.0.1",
+      "QRCoder >= 1.4.5",
       "System.IdentityModel.Tokens.Jwt >= 8.15.0"
     ]
   },
@@ -3988,6 +4019,10 @@
           "Microsoft.EntityFrameworkCore.SqlServer": {
             "target": "Package",
             "version": "[10.0.1, )"
+          },
+          "QRCoder": {
+            "target": "Package",
+            "version": "[1.4.5, )"
           },
           "System.IdentityModel.Tokens.Jwt": {
             "target": "Package",
@@ -4430,5 +4465,17 @@
         }
       }
     }
-  }
+  },
+  "logs": [
+    {
+      "code": "NU1603",
+      "level": "Warning",
+      "warningLevel": 1,
+      "message": "SmartAccountant.API depends on QRCoder (>= 1.4.5) but QRCoder 1.4.5 was not found. QRCoder 1.5.0 was resolved instead.",
+      "libraryId": "QRCoder",
+      "targetGraphs": [
+        "net10.0"
+      ]
+    }
+  ]
 }

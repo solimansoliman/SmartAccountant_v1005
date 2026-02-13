@@ -1,5 +1,6 @@
 using SmartAccountant.API.Data;
 using SmartAccountant.API.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace SmartAccountant.API.Services
 {
@@ -46,30 +47,47 @@ namespace SmartAccountant.API.Services
 
         public async Task LogAsync(ActivityLogEntry entry)
         {
-            var httpContext = _httpContextAccessor.HttpContext;
-            
-            var log = new ActivityLog
+            try
             {
-                AccountId = entry.AccountId,
-                UserId = entry.UserId,
-                Action = entry.Action,
-                EntityType = entry.EntityType,
-                EntityId = entry.EntityId,
-                EntityName = entry.EntityName,
-                Description = entry.Description,
-                DescriptionEn = entry.DescriptionEn,
-                OldValues = entry.OldValues,
-                NewValues = entry.NewValues,
-                Changes = entry.Changes,
-                IpAddress = entry.IpAddress ?? httpContext?.Connection?.RemoteIpAddress?.ToString(),
-                UserAgent = httpContext?.Request?.Headers["User-Agent"].ToString(),
-                Browser = entry.Browser ?? GetBrowserFromUserAgent(httpContext?.Request?.Headers["User-Agent"].ToString()),
-                Platform = entry.Platform ?? GetPlatformFromUserAgent(httpContext?.Request?.Headers["User-Agent"].ToString()),
-                CreatedAt = DateTime.UtcNow
-            };
+                var httpContext = _httpContextAccessor.HttpContext;
+                
+                var log = new ActivityLog
+                {
+                    AccountId = entry.AccountId,
+                    UserId = entry.UserId,
+                    Action = entry.Action,
+                    EntityType = entry.EntityType,
+                    EntityId = entry.EntityId,
+                    EntityName = entry.EntityName,
+                    Description = entry.Description,
+                    DescriptionEn = entry.DescriptionEn,
+                    OldValues = entry.OldValues,
+                    NewValues = entry.NewValues,
+                    Changes = entry.Changes,
+                    IpAddress = entry.IpAddress ?? httpContext?.Connection?.RemoteIpAddress?.ToString(),
+                    UserAgent = httpContext?.Request?.Headers["User-Agent"].ToString(),
+                    Browser = entry.Browser ?? GetBrowserFromUserAgent(httpContext?.Request?.Headers["User-Agent"].ToString()),
+                    Platform = entry.Platform ?? GetPlatformFromUserAgent(httpContext?.Request?.Headers["User-Agent"].ToString()),
+                    CreatedAt = DateTime.UtcNow
+                };
 
-            _context.ActivityLogs.Add(log);
-            await _context.SaveChangesAsync();
+                _context.ActivityLogs.Add(log);
+                await _context.SaveChangesAsync();
+            }
+            catch
+            {
+                // Activity logging is non-critical and should not break the main operation
+                // Silently fail to avoid disrupting the main transaction
+                var pendingLogs = _context.ChangeTracker
+                    .Entries<ActivityLog>()
+                    .Where(e => e.State == EntityState.Added)
+                    .ToList();
+
+                foreach (var pendingEntry in pendingLogs)
+                {
+                    pendingEntry.State = EntityState.Detached;
+                }
+            }
         }
 
         public async Task LogAsync(int accountId, int userId, string action, string entityType,

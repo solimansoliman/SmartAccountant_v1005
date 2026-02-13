@@ -152,11 +152,16 @@ namespace SmartAccountant.API.Models
         public bool HasApiAccess { get; set; } = false;
 
         /// <summary>
+        /// العمل بدون اتصال
+        /// </summary>
+        public bool HasOfflineMode { get; set; } = false;
+
+        /// <summary>
         /// إزالة العلامة التجارية
         /// </summary>
         public bool HasWhiteLabel { get; set; } = false;
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
     }
 }

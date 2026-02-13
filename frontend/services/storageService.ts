@@ -16,6 +16,41 @@ const KEYS = {
   READ_NOTIFICATIONS: 'app_read_notifications',
 };
 
+export const getSystemConfigStorageKey = (): string => {
+  try {
+    const userRaw = sessionStorage.getItem('smart_accountant_user') || localStorage.getItem('smart_accountant_user');
+    if (userRaw) {
+      const user = JSON.parse(userRaw);
+      if (user?.accountId) {
+        return `${KEYS.SYSTEM_CONFIG}_${user.accountId}`;
+      }
+      if (user?.parentId) {
+        return `${KEYS.SYSTEM_CONFIG}_${user.parentId}`;
+      }
+      if (user?.id) {
+        return `${KEYS.SYSTEM_CONFIG}_${user.id}`;
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  try {
+    const legacyCurrentUser = localStorage.getItem(KEYS.CURRENT_USER);
+    if (legacyCurrentUser) {
+      const user = JSON.parse(legacyCurrentUser) as User;
+      const ownerId = user.parentId ? user.parentId : user.id;
+      if (ownerId) {
+        return `${KEYS.SYSTEM_CONFIG}_${ownerId}`;
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  return KEYS.SYSTEM_CONFIG;
+};
+
 // --- DATA ISOLATION HELPER (Updated for Sub-users) ---
 const getStorageKey = (baseKey: string): string => {
   // Global keys that are shared or system-wide (independent of company)
@@ -200,9 +235,30 @@ const DEFAULT_PERMISSIONS: SystemPermissions = {
   
   // إعدادات تنسيق اسم الملفات للطباعة والحفظ
   fileNameFormat: '{app}-{company}-{type}-{customer}-{date}', // التنسيق الافتراضي
+
+  // حدود الحروف لحقول العملاء
+  customerNameMaxLength: 120,
+  customerAddressMaxLength: 220,
+  customerNotesMaxLength: 300,
+  customerPhoneMaxLength: 20,
+  customerEmailMaxLength: 120,
+
+  // حدود الحروف لحقول المنتجات والفواتير
+  productNameMaxLength: 120,
+  productNotesMaxLength: 300,
+  invoiceNotesMaxLength: 300,
+
+  // حدود الحروف لحقول التسجيل
+  registerUsernameMaxLength: 50,
+  registerFullNameMaxLength: 100,
+  registerCompanyNameMaxLength: 120,
+  registerEmailMaxLength: 100,
+  registerPasswordMaxLength: 64,
   
   // إعدادات وضع عدم الاتصال (Offline Mode)
   allowOfflineMode: true,              // السماح بالعمل بدون اتصال
+  allowOfflineByPlan: true,            // يتم تحديثها ديناميكياً حسب الباقة
+  effectiveOfflineModeEnabled: true,   // يتم إعادة حسابها عند تحميل الإعدادات
   offlineDataRetentionDays: 30,        // مدة الاحتفاظ بالبيانات المحلية (بالأيام)
   autoSyncOnReconnect: true,           // مزامنة تلقائية عند عودة الاتصال
   showOfflineIndicator: true,          // إظهار مؤشر حالة الاتصال
@@ -215,15 +271,30 @@ const DEFAULT_PERMISSIONS: SystemPermissions = {
 
 export const getSystemPermissions = (): SystemPermissions => {
   try {
-    const data = localStorage.getItem(KEYS.SYSTEM_CONFIG);
-    return data ? { ...DEFAULT_PERMISSIONS, ...JSON.parse(data) } : DEFAULT_PERMISSIONS;
+    const scopedKey = getSystemConfigStorageKey();
+    const scopedData = localStorage.getItem(scopedKey);
+    if (scopedData) {
+      return { ...DEFAULT_PERMISSIONS, ...JSON.parse(scopedData) };
+    }
+
+    const legacyData = localStorage.getItem(KEYS.SYSTEM_CONFIG);
+    if (legacyData) {
+      try {
+        localStorage.setItem(scopedKey, legacyData);
+      } catch {
+        // ignore migration write errors
+      }
+      return { ...DEFAULT_PERMISSIONS, ...JSON.parse(legacyData) };
+    }
+
+    return DEFAULT_PERMISSIONS;
   } catch {
     return DEFAULT_PERMISSIONS;
   }
 };
 
 export const saveSystemPermissions = (perms: SystemPermissions) => {
-  localStorage.setItem(KEYS.SYSTEM_CONFIG, JSON.stringify(perms));
+  localStorage.setItem(getSystemConfigStorageKey(), JSON.stringify(perms));
 };
 
 // --- SETTINGS MANAGEMENT ---

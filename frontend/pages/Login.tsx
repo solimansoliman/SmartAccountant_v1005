@@ -2,9 +2,32 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
-import { Wallet, Lock, User, Eye, EyeOff, Sparkles, ShieldCheck, Loader2 } from 'lucide-react';
+import { Wallet, Lock, User, Eye, EyeOff, Sparkles, ShieldCheck, Loader2, CircleHelp, LogIn, UserPlus } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { systemSettingsApi } from '../services/adminApi';
+import AccessibleModal from '../components/AccessibleModal';
+
+const DEFAULT_REGISTER_FIELD_LIMITS = {
+  username: 50,
+  name: 100,
+  companyName: 120,
+  email: 100,
+  password: 64,
+};
+
+const REGISTER_FIELD_BOUNDS = {
+  username: { min: 12, max: 80 },
+  name: { min: 30, max: 150 },
+  companyName: { min: 30, max: 180 },
+  email: { min: 40, max: 200 },
+  password: { min: 20, max: 128 },
+};
+
+const toBoundedInt = (raw: unknown, min: number, max: number, fallback: number): number => {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
+};
 
 const Login: React.FC = () => {
   const { login, isLoading, error, clearError } = useAuth();
@@ -14,6 +37,9 @@ const Login: React.FC = () => {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [helpView, setHelpView] = useState<'login' | 'register'>('login');
+  const [registerFieldLimits, setRegisterFieldLimits] = useState(DEFAULT_REGISTER_FIELD_LIMITS);
   
   // إعدادات الأزرار من قاعدة البيانات
   const [loginSettings, setLoginSettings] = useState({
@@ -27,9 +53,19 @@ const Login: React.FC = () => {
     const loadSettings = async () => {
       try {
         const settings = await systemSettingsApi.getPublicSettings();
+        const safeSettings = settings as Record<string, unknown>;
+
         setLoginSettings({
           showDemoLogin: settings.showDemoLogin === true || settings.showDemoLogin === 'true',
           showAdminLogin: settings.showAdminLogin === true || settings.showAdminLogin === 'true',
+        });
+
+        setRegisterFieldLimits({
+          username: toBoundedInt(safeSettings.registerUsernameMaxLength, REGISTER_FIELD_BOUNDS.username.min, REGISTER_FIELD_BOUNDS.username.max, DEFAULT_REGISTER_FIELD_LIMITS.username),
+          name: toBoundedInt(safeSettings.registerFullNameMaxLength, REGISTER_FIELD_BOUNDS.name.min, REGISTER_FIELD_BOUNDS.name.max, DEFAULT_REGISTER_FIELD_LIMITS.name),
+          companyName: toBoundedInt(safeSettings.registerCompanyNameMaxLength, REGISTER_FIELD_BOUNDS.companyName.min, REGISTER_FIELD_BOUNDS.companyName.max, DEFAULT_REGISTER_FIELD_LIMITS.companyName),
+          email: toBoundedInt(safeSettings.registerEmailMaxLength, REGISTER_FIELD_BOUNDS.email.min, REGISTER_FIELD_BOUNDS.email.max, DEFAULT_REGISTER_FIELD_LIMITS.email),
+          password: toBoundedInt(safeSettings.registerPasswordMaxLength, REGISTER_FIELD_BOUNDS.password.min, REGISTER_FIELD_BOUNDS.password.max, DEFAULT_REGISTER_FIELD_LIMITS.password),
         });
       } catch (err) {
         console.error('فشل في تحميل الإعدادات:', err);
@@ -65,16 +101,20 @@ const Login: React.FC = () => {
   };
 
   const fillDemoData = () => {
-      // Use real admin credentials from database
-      setIdentifier('admin');
-      setPassword('admin123');
-      notify('تم ملء بيانات الدخول (admin / admin123)', 'info');
+      setIdentifier('demo');
+      setPassword('');
+      notify('تم تعبئة اسم مستخدم تجريبي. أدخل كلمة المرور يدوياً.', 'info');
   };
 
   const fillAdminData = () => {
       setIdentifier('admin');
-      setPassword('admin123');
-      notify('تم ملء بيانات مدير النظام (admin / admin123)', 'warning');
+      setPassword('');
+      notify('تم تعبئة اسم المستخدم الإداري فقط. أدخل كلمة المرور يدوياً.', 'warning');
+  };
+
+  const openHelp = (view: 'login' | 'register') => {
+    setHelpView(view);
+    setShowHelpModal(true);
   };
 
   return (
@@ -142,6 +182,15 @@ const Login: React.FC = () => {
                 'تسجيل الدخول'
               )}
             </button>
+
+            <button
+              type="button"
+              onClick={() => openHelp('login')}
+              className="w-full border border-blue-200 bg-blue-50 text-blue-700 py-2.5 rounded-lg font-semibold hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+            >
+              <CircleHelp size={18} />
+              كيف تسجل الدخول؟
+            </button>
           </form>
           
           {/* أزرار الدخول السريع - تظهر فقط إذا كان أحدها مفعل في قاعدة البيانات */}
@@ -180,6 +229,96 @@ const Login: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <AccessibleModal
+        isOpen={showHelpModal}
+        onClose={() => setShowHelpModal(false)}
+        title="مساعدة تسجيل الدخول"
+        maxWidthClassName="max-w-2xl"
+      >
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setHelpView('login')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${helpView === 'login' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+            >
+              خطوات تسجيل الدخول
+            </button>
+            <button
+              type="button"
+              onClick={() => setHelpView('register')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${helpView === 'register' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+            >
+              شرح إنشاء الحساب
+            </button>
+          </div>
+
+          {helpView === 'login' ? (
+            <div className="space-y-3">
+              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50">
+                <p className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <LogIn size={16} />
+                  1) أدخل اسم المستخدم أو البريد
+                </p>
+                <p className="text-xs text-slate-600 mt-1">يمكنك تسجيل الدخول بأي منهما حسب ما استخدمته عند إنشاء الحساب.</p>
+              </div>
+              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50">
+                <p className="text-sm font-bold text-slate-800">2) أدخل كلمة المرور</p>
+                <p className="text-xs text-slate-600 mt-1">استخدم زر العين لإظهار/إخفاء كلمة المرور قبل الإرسال.</p>
+              </div>
+              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50">
+                <p className="text-sm font-bold text-slate-800">3) اضغط تسجيل الدخول</p>
+                <p className="text-xs text-slate-600 mt-1">إذا ظهرت رسالة خطأ، راجع اسم المستخدم وكلمة المرور ثم حاول مرة أخرى.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="p-3 rounded-lg border border-blue-200 bg-blue-50">
+                <p className="text-sm font-bold text-blue-800 flex items-center gap-2">
+                  <UserPlus size={16} />
+                  عند إنشاء الحساب، املأ الحقول التالية:
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg border border-slate-200">
+                  <p className="text-sm font-semibold text-slate-800">اسم المستخدم (للدخول - أحرف/أرقام و . _ -) <span className="text-xs text-slate-500">0/{registerFieldLimits.username}</span></p>
+                  <p className="text-xs text-slate-500 mt-1">مثال: healthy_food01</p>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200">
+                  <p className="text-sm font-semibold text-slate-800">الاسم الشخصي (الاسم الحقيقي لصاحب الحساب) <span className="text-xs text-slate-500">0/{registerFieldLimits.name}</span></p>
+                  <p className="text-xs text-slate-500 mt-1">مثال: أحمد سالم</p>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200">
+                  <p className="text-sm font-semibold text-slate-800">اسم الشركة / المتجر (يظهر على الفواتير والتقارير) <span className="text-xs text-slate-500">0/{registerFieldLimits.companyName}</span></p>
+                  <p className="text-xs text-slate-500 mt-1">مثال: هلثي فود</p>
+                  <p className="text-xs text-slate-500">أو: helthFFom</p>
+                  <p className="text-xs text-slate-500">بدون كلمة شركة</p>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200">
+                  <p className="text-sm font-semibold text-slate-800">البريد الإلكتروني (للتواصل واسترجاع الحساب) <span className="text-xs text-slate-500">0/{registerFieldLimits.email}</span></p>
+                  <p className="text-xs text-slate-500 mt-1">مثال: owner@healthyfood.com</p>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200 sm:col-span-2">
+                  <p className="text-sm font-semibold text-slate-800">كلمة المرور (يفضل حروفا وارقاما لزيادة الامان) <span className="text-xs text-slate-500">0/{registerFieldLimits.password}</span></p>
+                  <p className="text-xs text-slate-500 mt-1">مثال: Hf2026safe</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">نفس عدادات شاشة التسجيل الرسمية، والحدود تُحدَّث حسب إعدادات المدير.</p>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setShowHelpModal(false)}
+              className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 transition-colors"
+            >
+              فهمت
+            </button>
+          </div>
+        </div>
+      </AccessibleModal>
     </div>
   );
 };

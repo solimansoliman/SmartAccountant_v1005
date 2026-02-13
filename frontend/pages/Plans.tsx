@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
 import { accountApi, plansApi, ApiPlan } from '../services/adminApi';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 // تعريف الخطط للعرض
 interface DisplayPlan {
@@ -105,6 +106,9 @@ const convertApiPlanToDisplay = (apiPlan: ApiPlan): DisplayPlan => {
   
   // API Access
   features.push({ name: 'API Access', included: apiPlan.hasApiAccess });
+
+  // Offline Mode
+  features.push({ name: 'العمل بدون اتصال', included: apiPlan.hasOfflineMode });
   
   return {
     id: apiPlan.id,
@@ -163,6 +167,8 @@ const Plans: React.FC = () => {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [showDowngradeConfirm, setShowDowngradeConfirm] = useState(false);
+  const [pendingPlanId, setPendingPlanId] = useState<number | null>(null);
 
   // تحميل الخطط من API
   useEffect(() => {
@@ -175,9 +181,15 @@ const Plans: React.FC = () => {
           .sort((a, b) => a.sortOrder - b.sortOrder)
           .map(convertApiPlanToDisplay);
         setPlans(displayPlans);
-      } catch (error) {
-        console.error('Failed to load plans:', error);
-        notify('فشل في تحميل الخطط', 'error');
+      } catch (error: any) {
+        // تجاهل أخطاء الصلاحيات والأخطاء 500
+        if (error?.status === 403 || error?.status === 401 || error?.status === 500) {
+          console.log('Cannot load plans from API - user may not have permissions');
+          // لا نعرض تنبيه، نترك الخطط فارغة أو نستخدم القيم الافتراضية
+        } else {
+          console.error('Failed to load plans:', error);
+          notify('فشل في تحميل الخطط', 'error');
+        }
       } finally {
         setLoading(false);
       }
@@ -220,6 +232,17 @@ const Plans: React.FC = () => {
     return (plan.price * 12) - plan.yearlyPrice;
   };
 
+  const proceedPlanSelection = (planId: number) => {
+    setActionLoading(true);
+
+    // محاكاة عملية الدفع
+    setTimeout(() => {
+      setActionLoading(false);
+      notify('تم توجيهك لصفحة الدفع...', 'info');
+      // هنا يمكن إضافة التكامل مع بوابة الدفع
+    }, 1000);
+  };
+
   // التعامل مع اختيار خطة
   const handleSelectPlan = async (planId: number) => {
     if (planId === currentPlan) {
@@ -231,19 +254,30 @@ const Plans: React.FC = () => {
     const selectedPlanIndex = plans.findIndex(p => p.id === planId);
 
     if (selectedPlanIndex < currentPlanIndex) {
-      if (!confirm('هل تريد تخفيض خطتك؟ قد تفقد بعض الميزات.')) {
-        return;
-      }
+      setPendingPlanId(planId);
+      setShowDowngradeConfirm(true);
+      return;
     }
 
-    setActionLoading(true);
-    
-    // محاكاة عملية الدفع
-    setTimeout(() => {
-      setActionLoading(false);
-      notify('تم توجيهك لصفحة الدفع...', 'info');
-      // هنا يمكن إضافة التكامل مع بوابة الدفع
-    }, 1000);
+    proceedPlanSelection(planId);
+  };
+
+  const handleConfirmDowngrade = () => {
+    if (!pendingPlanId) {
+      setShowDowngradeConfirm(false);
+      return;
+    }
+
+    setShowDowngradeConfirm(false);
+    const selectedId = pendingPlanId;
+    setPendingPlanId(null);
+    proceedPlanSelection(selectedId);
+  };
+
+  const handleCancelDowngrade = () => {
+    setShowDowngradeConfirm(false);
+    setPendingPlanId(null);
+    notify('تم إلغاء تغيير الخطة', 'info');
   };
 
   // تنسيق التاريخ
@@ -335,6 +369,16 @@ const Plans: React.FC = () => {
           </div>
         );
       })()}
+
+      <ConfirmDialog
+        isOpen={showDowngradeConfirm}
+        title="تأكيد تخفيض الخطة"
+        message="هل تريد تخفيض خطتك؟ قد تفقد بعض الميزات الحالية."
+        onConfirm={handleConfirmDowngrade}
+        onCancel={handleCancelDowngrade}
+        confirmText="نعم، متابعة"
+        cancelText="إلغاء"
+      />
 
       {/* Plans Grid */}
       {!loading && plans.length > 0 && (

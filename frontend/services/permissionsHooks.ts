@@ -13,6 +13,7 @@ import {
   getCurrentUserPermission,
   MODULE_IDS 
 } from './permissionsService';
+import { getAccountUsage } from './planLimitsService';
 
 // Event name for permissions changes
 export const PERMISSIONS_CHANGED_EVENT = 'permissionsMatrixChanged';
@@ -148,9 +149,11 @@ export const useMenuPermissions = () => {
     'menu_reports',
     'menu_settings',
     'menu_notifications',
-    'menu_messages'
+    'menu_messages',
+    'menu_plans'
   ]); // ابدأ بكل شيء مسموح
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [planId, setPlanId] = useState<number | undefined>(undefined);
 
   // استمع للتغييرات في الصلاحيات
   useEffect(() => {
@@ -173,6 +176,15 @@ export const useMenuPermissions = () => {
     };
   }, []);
 
+  // جلب رقم الخطة من الاستخدام (مخزن مؤقتاً 5 دقائق)
+  useEffect(() => {
+    if (user?.accountId) {
+      getAccountUsage(user.accountId).then(usage => {
+        if (usage?.planId) setPlanId(usage.planId);
+      });
+    }
+  }, [user?.accountId]);
+
   useEffect(() => {
     const menuIds = [
       'menu_dashboard',
@@ -183,7 +195,8 @@ export const useMenuPermissions = () => {
       'menu_reports',
       'menu_settings',
       'menu_notifications',
-      'menu_messages'
+      'menu_messages',
+      'menu_plans'
     ];
     
     if (user) {
@@ -194,7 +207,8 @@ export const useMenuPermissions = () => {
           userId,
           (user as any).roleIds,
           user.accountId,
-          menuId
+          menuId,
+          planId
         );
         return perm.view;
       });
@@ -205,7 +219,7 @@ export const useMenuPermissions = () => {
       // إذا لم يوجد مستخدم، أظهر كل القوائم
       setAllowedMenus(menuIds);
     }
-  }, [user, refreshTrigger]);
+  }, [user, refreshTrigger, planId]);
 
   return {
     allowedMenus,
@@ -219,6 +233,7 @@ export const useMenuPermissions = () => {
     canShowSettings: allowedMenus.includes('menu_settings'),
     canShowNotifications: allowedMenus.includes('menu_notifications'),
     canShowMessages: allowedMenus.includes('menu_messages'),
+    canShowPlans: allowedMenus.includes('menu_plans'),
   };
 };
 

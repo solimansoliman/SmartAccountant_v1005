@@ -12,11 +12,16 @@ namespace SmartAccountant.API.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IActivityLogService _activityLog;
+        private readonly ICustomerInputLimitsService _inputLimitsService;
 
-        public CustomersController(ApplicationDbContext context, IActivityLogService activityLog)
+        public CustomersController(
+            ApplicationDbContext context,
+            IActivityLogService activityLog,
+            ICustomerInputLimitsService inputLimitsService)
         {
             _context = context;
             _activityLog = activityLog;
+            _inputLimitsService = inputLimitsService;
         }
 
         private int GetAccountId()
@@ -46,49 +51,50 @@ namespace SmartAccountant.API.Controllers
         public async Task<ActionResult<IEnumerable<CustomerDto>>> GetCustomers(
             [FromQuery] string? search)
         {
-            var accountId = GetAccountId();
-            
-            var query = _context.Customers
-                .Include(c => c.PrimaryPhone)
-                .Include(c => c.SecondaryPhone)
-                .Include(c => c.PrimaryEmail)
-                .Where(c => c.AccountId == accountId && c.IsActive)
-                .AsQueryable();
-
-            if (!string.IsNullOrEmpty(search))
+            try
             {
-                query = query.Where(c => 
-                    c.Name.Contains(search) || 
-                    c.Code.Contains(search) || 
-                    (c.PrimaryPhone != null && c.PrimaryPhone.Phone.Contains(search)));
+                var accountId = GetAccountId();
+                
+                var query = _context.Customers
+                    .Where(c => c.AccountId == accountId && c.IsActive)
+                    .AsQueryable();
+
+                if (!string.IsNullOrEmpty(search))
+                {
+                    query = query.Where(c => 
+                        c.Name.Contains(search) || 
+                        c.Code.Contains(search));
+                }
+
+                var customers = await query.OrderBy(c => c.Name).ToListAsync();
+            
+                return Ok(customers.Select(c => new CustomerDto
+                {
+                    Id = c.Id,
+                    AccountId = c.AccountId,
+                    Code = c.Code,
+                    Name = c.Name,
+                    Type = c.Type,
+                    Address = c.Address,
+                    Balance = c.Balance,
+                    IsVIP = c.IsVIP,
+                    TotalPurchases = c.TotalPurchases,
+                    TotalPayments = c.TotalPayments,
+                    InvoiceCount = c.InvoiceCount,
+                    JoinDate = c.JoinDate,
+                    LastPurchaseDate = c.LastPurchaseDate,
+                    LastPaymentDate = c.LastPaymentDate,
+                    Notes = c.Notes,
+                    IsActive = c.IsActive,
+                    CreatedAt = c.CreatedAt,
+                    UpdatedAt = c.UpdatedAt
+                }));
             }
-
-            var customers = await query.OrderBy(c => c.Name).ToListAsync();
-            
-            return customers.Select(c => new CustomerDto
+            catch (Exception ex)
             {
-                Id = c.Id,
-                AccountId = c.AccountId,
-                Code = c.Code,
-                Name = c.Name,
-                NameEn = c.NameEn,
-                ContactPerson = c.ContactPerson,
-                Phone = c.PrimaryPhone?.Phone,
-                Phone2 = c.SecondaryPhone?.Phone,
-                Email = c.PrimaryEmail?.EmailAddress,
-                PrimaryPhoneId = c.PrimaryPhoneId,
-                SecondaryPhoneId = c.SecondaryPhoneId,
-                PrimaryEmailId = c.PrimaryEmailId,
-                Address = c.Address,
-                City = c.City,
-                TaxNumber = c.TaxNumber,
-                Type = c.Type,
-                CreditLimit = c.CreditLimit,
-                Balance = c.Balance,
-                Notes = c.Notes,
-                IsActive = c.IsActive,
-                CreatedAt = c.CreatedAt
-            }).ToList();
+                var errorMsg = ex.InnerException?.Message ?? ex.Message;
+                return StatusCode(500, new { message = "خطأ في جلب بيانات العملاء", error = errorMsg });
+            }
         }
 
         /// <summary>
@@ -97,42 +103,108 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<CustomerDto>> GetCustomer(int id)
         {
-            var accountId = GetAccountId();
-            var customer = await _context.Customers
-                .Include(c => c.PrimaryPhone)
-                .Include(c => c.SecondaryPhone)
-                .Include(c => c.PrimaryEmail)
-                .FirstOrDefaultAsync(c => c.Id == id && c.AccountId == accountId);
+            try
+            {
+                var accountId = GetAccountId();
+                var customer = await _context.Customers
+                    .Include(c => c.PrimaryEmail)
+                    .FirstOrDefaultAsync(c => c.Id == id && c.AccountId == accountId);
+                    
+                if (customer == null)
+                {
+                    return NotFound();
+                }
                 
-            if (customer == null)
-            {
-                return NotFound();
+                var customerDto = new CustomerDto
+                {
+                    Id = customer.Id,
+                    AccountId = customer.AccountId,
+                    Code = customer.Code,
+                    Name = customer.Name,
+                    PrimaryPhoneId = customer.PrimaryPhoneId,
+                    SecondaryPhoneId = customer.SecondaryPhoneId,
+                    PrimaryEmailId = customer.PrimaryEmailId,
+                    PrimaryEmailAddress = customer.PrimaryEmail?.EmailAddress,
+                    CountryId = customer.CountryId,
+                    CountryName = null,
+                    ProvinceId = customer.ProvinceId,
+                    ProvinceName = null,
+                    CityId = customer.CityId,
+                    CityName = null,
+                    Address = customer.Address,
+                    Type = customer.Type,
+                    Balance = customer.Balance,
+                    JoinDate = customer.JoinDate,
+                    LastPurchaseDate = customer.LastPurchaseDate,
+                    LastPaymentDate = customer.LastPaymentDate,
+                    TotalPurchases = customer.TotalPurchases,
+                    TotalPayments = customer.TotalPayments,
+                    InvoiceCount = customer.InvoiceCount,
+                    Notes = customer.Notes,
+                    IsActive = customer.IsActive,
+                    IsVIP = customer.IsVIP,
+                    CreatedAt = customer.CreatedAt,
+                    UpdatedAt = customer.UpdatedAt,
+                    Phones = new(),
+                    Emails = new()
+                };
+                
+                return Ok(customerDto);
             }
-            
-            return new CustomerDto
+            catch
             {
-                Id = customer.Id,
-                AccountId = customer.AccountId,
-                Code = customer.Code,
-                Name = customer.Name,
-                NameEn = customer.NameEn,
-                ContactPerson = customer.ContactPerson,
-                Phone = customer.PrimaryPhone?.Phone,
-                Phone2 = customer.SecondaryPhone?.Phone,
-                Email = customer.PrimaryEmail?.EmailAddress,
-                PrimaryPhoneId = customer.PrimaryPhoneId,
-                SecondaryPhoneId = customer.SecondaryPhoneId,
-                PrimaryEmailId = customer.PrimaryEmailId,
-                Address = customer.Address,
-                City = customer.City,
-                TaxNumber = customer.TaxNumber,
-                Type = customer.Type,
-                CreditLimit = customer.CreditLimit,
-                Balance = customer.Balance,
-                Notes = customer.Notes,
-                IsActive = customer.IsActive,
-                CreatedAt = customer.CreatedAt
-            };
+                // Fallback for legacy schemas missing optional relations.
+                var accountId = GetAccountId();
+                var customer = await _context.Customers
+                    .FirstOrDefaultAsync(c => c.Id == id && c.AccountId == accountId);
+
+                if (customer == null)
+                {
+                    return NotFound();
+                }
+
+                string? primaryEmailAddress = null;
+                if (customer.PrimaryEmailId.HasValue)
+                {
+                    var email = await _context.Emails
+                        .FirstOrDefaultAsync(e => e.Id == customer.PrimaryEmailId.Value && e.AccountId == accountId);
+                    primaryEmailAddress = email?.EmailAddress;
+                }
+
+                return Ok(new CustomerDto
+                {
+                    Id = customer.Id,
+                    AccountId = customer.AccountId,
+                    Code = customer.Code,
+                    Name = customer.Name,
+                    PrimaryPhoneId = customer.PrimaryPhoneId,
+                    SecondaryPhoneId = customer.SecondaryPhoneId,
+                    PrimaryEmailId = customer.PrimaryEmailId,
+                    PrimaryEmailAddress = primaryEmailAddress,
+                    CountryId = customer.CountryId,
+                    CountryName = null,
+                    ProvinceId = customer.ProvinceId,
+                    ProvinceName = null,
+                    CityId = customer.CityId,
+                    CityName = null,
+                    Address = customer.Address,
+                    Type = customer.Type,
+                    Balance = customer.Balance,
+                    JoinDate = customer.JoinDate,
+                    LastPurchaseDate = customer.LastPurchaseDate,
+                    LastPaymentDate = customer.LastPaymentDate,
+                    TotalPurchases = customer.TotalPurchases,
+                    TotalPayments = customer.TotalPayments,
+                    InvoiceCount = customer.InvoiceCount,
+                    Notes = customer.Notes,
+                    IsActive = customer.IsActive,
+                    IsVIP = customer.IsVIP,
+                    CreatedAt = customer.CreatedAt,
+                    UpdatedAt = customer.UpdatedAt,
+                    Phones = new(),
+                    Emails = new()
+                });
+            }
         }
 
         /// <summary>
@@ -141,129 +213,147 @@ namespace SmartAccountant.API.Controllers
         [HttpPost]
         public async Task<ActionResult<CustomerDto>> CreateCustomer(CreateCustomerDto dto)
         {
-            var accountId = GetAccountId();
-            
-            // إنشاء سجل هاتف أساسي إذا تم تقديمه
-            PhoneNumber? primaryPhone = null;
-            if (!string.IsNullOrEmpty(dto.Phone))
+            try
             {
-                primaryPhone = new PhoneNumber
+                var accountId = GetAccountId();
+                var limits = await _inputLimitsService.GetLimitsAsync(accountId);
+                var customerName = (dto.Name ?? string.Empty).Trim();
+                var primaryEmailAddress = dto.PrimaryEmailAddress?.Trim();
+
+                if (string.IsNullOrWhiteSpace(customerName))
+                {
+                    return BadRequest(new { message = "اسم العميل مطلوب" });
+                }
+
+                if (customerName.Length > limits.CustomerNameMaxLength)
+                {
+                    return BadRequest(new { message = $"اسم العميل يتجاوز الحد المسموح ({limits.CustomerNameMaxLength})" });
+                }
+
+                if (!string.IsNullOrEmpty(dto.Address) && dto.Address.Length > limits.CustomerAddressMaxLength)
+                {
+                    return BadRequest(new { message = $"تفاصيل العنوان تتجاوز الحد المسموح ({limits.CustomerAddressMaxLength})" });
+                }
+
+                if (!string.IsNullOrEmpty(dto.Notes) && dto.Notes.Length > limits.CustomerNotesMaxLength)
+                {
+                    return BadRequest(new { message = $"الملاحظات تتجاوز الحد المسموح ({limits.CustomerNotesMaxLength})" });
+                }
+
+                if (!string.IsNullOrEmpty(primaryEmailAddress) && primaryEmailAddress.Length > limits.CustomerEmailMaxLength)
+                {
+                    return BadRequest(new { message = $"البريد الإلكتروني يتجاوز الحد المسموح ({limits.CustomerEmailMaxLength})" });
+                }
+                
+                // توليد كود العميل تلقائياً
+                var lastCustomer = await _context.Customers
+                    .Where(c => c.AccountId == accountId)
+                    .OrderByDescending(c => c.Id)
+                    .FirstOrDefaultAsync();
+
+                var nextNumber = (lastCustomer?.Id ?? 0) + 1;
+                
+                var customer = new Customer
                 {
                     AccountId = accountId,
-                    EntityType = "Customer",
-                    EntityId = 0, // سيتم تحديثه بعد إنشاء العميل
-                    Phone = dto.Phone,
-                    PhoneType = "mobile",
-                    IsPrimary = true,
-                    CreatedAt = DateTime.UtcNow
+                    Code = string.IsNullOrEmpty(dto.Code) ? $"C{nextNumber:D4}" : dto.Code,
+                    Name = customerName,
+                    // Use text fields from the database schema instead of FK references
+                    Address = dto.Address,
+                    Type = dto.Type,
+                    JoinDate = dto.JoinDate ?? DateTime.UtcNow,
+                    Notes = dto.Notes,
+                    IsVIP = dto.IsVIP,
+                    InvoiceCount = 0,
+                    TotalPurchases = 0,
+                    TotalPayments = 0,
+                    Balance = 0,
+                    PrimaryEmailId = null, // لا تعيين بريد إلكتروني أساسي في البداية
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedByUserId = GetUserId()
                 };
-                _context.PhoneNumbers.Add(primaryPhone);
+
+                _context.Customers.Add(customer);
                 await _context.SaveChangesAsync();
-            }
-            
-            // إنشاء سجل هاتف ثانوي إذا تم تقديمه
-            PhoneNumber? secondaryPhone = null;
-            if (!string.IsNullOrEmpty(dto.Phone2))
-            {
-                secondaryPhone = new PhoneNumber
+
+                // معالجة البريد الإلكتروني الأساسي بعد إنشاء العميل
+                if (!string.IsNullOrEmpty(primaryEmailAddress))
                 {
-                    AccountId = accountId,
-                    EntityType = "Customer",
-                    EntityId = 0,
-                    Phone = dto.Phone2,
-                    PhoneType = "mobile",
-                    IsPrimary = false,
-                    CreatedAt = DateTime.UtcNow
-                };
-                _context.PhoneNumbers.Add(secondaryPhone);
-                await _context.SaveChangesAsync();
-            }
-            
-            // إنشاء سجل إيميل إذا تم تقديمه
-            Email? primaryEmail = null;
-            if (!string.IsNullOrEmpty(dto.Email))
-            {
-                primaryEmail = new Email
+                    try
+                    {
+                        // إنشاء بريد إلكتروني جديد في جدول Emails (المربوط بـ PrimaryEmailId)
+                        var newEmail = new Email
+                        {
+                            AccountId = accountId,
+                            EntityType = "Customer",
+                            EntityId = customer.Id,
+                            EmailAddress = primaryEmailAddress,
+                            EmailType = "work",
+                            IsPrimary = true,
+                            IsActive = true,
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedByUserId = GetUserId()
+                        };
+                        _context.Emails.Add(newEmail);
+                        await _context.SaveChangesAsync();
+                        
+                        // تحديث العميل بتعيين البريد الإلكتروني الأساسي
+                        customer.PrimaryEmailId = newEmail.Id;
+                        _context.Customers.Update(customer);
+                        await _context.SaveChangesAsync();
+                    }
+                    catch (Exception emailEx)
+                    {
+                        // Log email creation error but continue - customer was created successfully
+                        Console.WriteLine($"Error creating email for customer: {emailEx.Message}");
+                    }
+                }
+
+
+                // تسجيل النشاط (non-blocking, wrap in try-catch)
+                try
                 {
-                    AccountId = accountId,
-                    EntityType = "Customer",
-                    EntityId = 0,
-                    EmailAddress = dto.Email,
-                    EmailType = "work",
-                    IsPrimary = true,
-                    CreatedAt = DateTime.UtcNow
-                };
-                _context.Emails.Add(primaryEmail);
-                await _context.SaveChangesAsync();
-            }
-            
-            // توليد كود العميل تلقائياً
-            var lastCustomer = await _context.Customers
-                .Where(c => c.AccountId == accountId)
-                .OrderByDescending(c => c.Id)
-                .FirstOrDefaultAsync();
+                    await _activityLog.LogAsync(accountId, GetUserId(), ActivityActions.CreateCustomer, EntityTypes.Customer,
+                        customer.Id, customer.Name, $"تم إنشاء عميل جديد: {customer.Name} (الكود: {customer.Code})");
+                }
+                catch { /* Activity logging is non-critical */ }
 
-            var nextNumber = (lastCustomer?.Id ?? 0) + 1;
-            
-            var customer = new Customer
-            {
-                AccountId = accountId,
-                Code = string.IsNullOrEmpty(dto.Code) ? $"C{nextNumber:D4}" : dto.Code,
-                Name = dto.Name,
-                NameEn = dto.NameEn,
-                ContactPerson = dto.ContactPerson,
-                PrimaryPhoneId = primaryPhone?.Id,
-                SecondaryPhoneId = secondaryPhone?.Id,
-                PrimaryEmailId = primaryEmail?.Id,
-                Address = dto.Address,
-                City = dto.City,
-                TaxNumber = dto.TaxNumber,
-                Type = dto.Type,
-                CreditLimit = dto.CreditLimit,
-                Notes = dto.Notes,
-                InvoiceCount = 0,
-                TotalPurchases = 0,
-                TotalPayments = 0,
-                Balance = 0,
-                JoinDate = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            _context.Customers.Add(customer);
-            await _context.SaveChangesAsync();
-            
-            // تحديث EntityId في الهواتف والإيميلات
-            if (primaryPhone != null)
-            {
-                primaryPhone.EntityId = customer.Id;
+                // Return created customer response (without eager loading to avoid lazy load issues)
+                return CreatedAtAction(nameof(GetCustomer), new { id = customer.Id }, new CustomerDto
+                {
+                    Id = customer.Id,
+                    AccountId = customer.AccountId,
+                    Code = customer.Code,
+                    Name = customer.Name,
+                    CountryId = customer.CountryId,
+                    CountryName = null,
+                    ProvinceId = customer.ProvinceId,
+                    ProvinceName = null,
+                    CityId = customer.CityId,
+                    CityName = null,
+                    Address = customer.Address,
+                    Type = customer.Type,
+                    Balance = customer.Balance,
+                    JoinDate = customer.JoinDate,
+                    Notes = customer.Notes,
+                    IsActive = customer.IsActive,
+                    IsVIP = customer.IsVIP,
+                    InvoiceCount = customer.InvoiceCount,
+                    TotalPurchases = customer.TotalPurchases,
+                    TotalPayments = customer.TotalPayments,
+                    PrimaryEmailId = customer.PrimaryEmailId,
+                    PrimaryEmailAddress = primaryEmailAddress,
+                    CreatedAt = customer.CreatedAt,
+                    UpdatedAt = customer.UpdatedAt
+                });
             }
-            if (secondaryPhone != null)
+            catch (Exception ex)
             {
-                secondaryPhone.EntityId = customer.Id;
+                var errorMsg = ex.InnerException?.Message ?? ex.Message;
+                // Remove file paths from error message
+                errorMsg = System.Text.RegularExpressions.Regex.Replace(errorMsg, @"C:\\[^'""]*\\", "");
+                return StatusCode(500, new { message = "حدث خطأ أثناء إنشاء العميل", error = errorMsg });
             }
-            if (primaryEmail != null)
-            {
-                primaryEmail.EntityId = customer.Id;
-            }
-            await _context.SaveChangesAsync();
-
-            // تسجيل النشاط
-            await _activityLog.LogAsync(accountId, GetUserId(), ActivityActions.CreateCustomer, EntityTypes.Customer,
-                customer.Id, customer.Name, $"تم إنشاء عميل جديد: {customer.Name} (الكود: {customer.Code})");
-
-            return CreatedAtAction(nameof(GetCustomer), new { id = customer.Id }, new CustomerDto
-            {
-                Id = customer.Id,
-                AccountId = customer.AccountId,
-                Code = customer.Code,
-                Name = customer.Name,
-                Phone = primaryPhone?.Phone,
-                Phone2 = secondaryPhone?.Phone,
-                Email = primaryEmail?.EmailAddress,
-                Notes = customer.Notes,
-                IsActive = customer.IsActive,
-                CreatedAt = customer.CreatedAt
-            });
         }
 
         /// <summary>
@@ -272,114 +362,201 @@ namespace SmartAccountant.API.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateCustomer(int id, UpdateCustomerDto dto)
         {
-            var accountId = GetAccountId();
-
-            var existingCustomer = await _context.Customers
-                .Include(c => c.PrimaryPhone)
-                .Include(c => c.SecondaryPhone)
-                .Include(c => c.PrimaryEmail)
-                .FirstOrDefaultAsync(c => c.Id == id && c.AccountId == accountId);
-                
-            if (existingCustomer == null)
+            try
             {
-                return NotFound();
-            }
+                var accountId = GetAccountId();
+                var limits = await _inputLimitsService.GetLimitsAsync(accountId);
+                var primaryEmailAddress = dto.PrimaryEmailAddress?.Trim();
 
-            // تحديث الهاتف الأساسي
-            if (dto.Phone != null)
-            {
-                if (existingCustomer.PrimaryPhone != null)
+                var existingCustomer = await _context.Customers
+                    .Include(c => c.PrimaryPhone)
+                    .Include(c => c.SecondaryPhone)
+                    .Include(c => c.PrimaryEmail)
+                    .FirstOrDefaultAsync(c => c.Id == id && c.AccountId == accountId);
+                    
+                if (existingCustomer == null)
                 {
-                    existingCustomer.PrimaryPhone.Phone = dto.Phone;
-                    existingCustomer.PrimaryPhone.UpdatedAt = DateTime.UtcNow;
+                    return NotFound();
                 }
-                else if (!string.IsNullOrEmpty(dto.Phone))
+
+                if (dto.Name != null)
                 {
-                    var newPhone = new PhoneNumber
+                    var trimmedName = dto.Name.Trim();
+                    if (string.IsNullOrWhiteSpace(trimmedName))
                     {
-                        AccountId = accountId,
-                        EntityType = "Customer",
-                        EntityId = id,
-                        Phone = dto.Phone,
-                        PhoneType = "mobile",
-                        IsPrimary = true,
-                        CreatedAt = DateTime.UtcNow
-                    };
-                    _context.PhoneNumbers.Add(newPhone);
-                    await _context.SaveChangesAsync();
-                    existingCustomer.PrimaryPhoneId = newPhone.Id;
-                }
-            }
-            
-            // تحديث الهاتف الثانوي
-            if (dto.Phone2 != null)
-            {
-                if (existingCustomer.SecondaryPhone != null)
-                {
-                    existingCustomer.SecondaryPhone.Phone = dto.Phone2;
-                    existingCustomer.SecondaryPhone.UpdatedAt = DateTime.UtcNow;
-                }
-                else if (!string.IsNullOrEmpty(dto.Phone2))
-                {
-                    var newPhone = new PhoneNumber
+                        return BadRequest(new { message = "اسم العميل مطلوب" });
+                    }
+
+                    if (trimmedName.Length > limits.CustomerNameMaxLength)
                     {
-                        AccountId = accountId,
-                        EntityType = "Customer",
-                        EntityId = id,
-                        Phone = dto.Phone2,
-                        PhoneType = "mobile",
-                        IsPrimary = false,
-                        CreatedAt = DateTime.UtcNow
-                    };
-                    _context.PhoneNumbers.Add(newPhone);
-                    await _context.SaveChangesAsync();
-                    existingCustomer.SecondaryPhoneId = newPhone.Id;
+                        return BadRequest(new { message = $"اسم العميل يتجاوز الحد المسموح ({limits.CustomerNameMaxLength})" });
+                    }
+
+                    existingCustomer.Name = trimmedName;
                 }
-            }
-            
-            // تحديث الإيميل
-            if (dto.Email != null)
-            {
-                if (existingCustomer.PrimaryEmail != null)
+
+                if (dto.Address != null && dto.Address.Length > limits.CustomerAddressMaxLength)
                 {
-                    existingCustomer.PrimaryEmail.EmailAddress = dto.Email;
-                    existingCustomer.PrimaryEmail.UpdatedAt = DateTime.UtcNow;
+                    return BadRequest(new { message = $"تفاصيل العنوان تتجاوز الحد المسموح ({limits.CustomerAddressMaxLength})" });
                 }
-                else if (!string.IsNullOrEmpty(dto.Email))
+
+                if (dto.Notes != null && dto.Notes.Length > limits.CustomerNotesMaxLength)
                 {
-                    var newEmail = new Email
+                    return BadRequest(new { message = $"الملاحظات تتجاوز الحد المسموح ({limits.CustomerNotesMaxLength})" });
+                }
+
+                if (dto.PrimaryEmailAddress != null && !string.IsNullOrEmpty(primaryEmailAddress) && primaryEmailAddress.Length > limits.CustomerEmailMaxLength)
+                {
+                    return BadRequest(new { message = $"البريد الإلكتروني يتجاوز الحد المسموح ({limits.CustomerEmailMaxLength})" });
+                }
+
+                existingCustomer.CityId = dto.CityId ?? existingCustomer.CityId;
+                existingCustomer.ProvinceId = dto.ProvinceId ?? existingCustomer.ProvinceId;
+                existingCustomer.CountryId = dto.CountryId ?? existingCustomer.CountryId;
+                existingCustomer.Address = dto.Address ?? existingCustomer.Address;
+                existingCustomer.Type = dto.Type ?? existingCustomer.Type;
+                existingCustomer.Notes = dto.Notes ?? existingCustomer.Notes;
+                if (dto.IsVIP.HasValue)
+                    existingCustomer.IsVIP = dto.IsVIP.Value;
+
+                // معالجة تحديث البريد الإلكتروني الأساسي
+                if (!string.IsNullOrEmpty(primaryEmailAddress))
+                {
+                    // البحث عن بريد إلكتروني موجود بهذا العنوان
+                    var existingEmail = await _context.Emails
+                        .Where(e => e.AccountId == accountId && e.EntityType == "Customer" && e.EntityId == id && e.EmailAddress == primaryEmailAddress && e.IsActive)
+                        .FirstOrDefaultAsync();
+
+                    if (existingEmail != null)
                     {
-                        AccountId = accountId,
-                        EntityType = "Customer",
-                        EntityId = id,
-                        EmailAddress = dto.Email,
-                        EmailType = "work",
-                        IsPrimary = true,
-                        CreatedAt = DateTime.UtcNow
-                    };
-                    _context.Emails.Add(newEmail);
-                    await _context.SaveChangesAsync();
-                    existingCustomer.PrimaryEmailId = newEmail.Id;
+                        // استخدام البريد الإلكتروني الموجود
+                        existingEmail.IsPrimary = true;
+                        existingEmail.UpdatedAt = DateTime.UtcNow;
+                        existingCustomer.PrimaryEmailId = existingEmail.Id;
+                    }
+                    else
+                    {
+                        // إنشاء بريد إلكتروني جديد وتعيينه كبريد أساسي
+                        var newEmail = new Email
+                        {
+                            AccountId = accountId,
+                            EntityType = "Customer",
+                            EntityId = id,
+                            EmailAddress = primaryEmailAddress,
+                            EmailType = "work",
+                            IsPrimary = true,
+                            IsActive = true,
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedByUserId = GetUserId()
+                        };
+                        _context.Emails.Add(newEmail);
+                        await _context.SaveChangesAsync();
+                        existingCustomer.PrimaryEmailId = newEmail.Id;
+                    }
+
+                    // إلغاء الوسم الأساسي عن أي بريد آخر للعميل
+                    var otherPrimaryEmails = await _context.Emails
+                        .Where(e => e.AccountId == accountId && e.EntityType == "Customer" && e.EntityId == id && e.Id != existingCustomer.PrimaryEmailId && e.IsPrimary)
+                        .ToListAsync();
+                    foreach (var email in otherPrimaryEmails)
+                    {
+                        email.IsPrimary = false;
+                        email.UpdatedAt = DateTime.UtcNow;
+                    }
                 }
+                else if (dto.PrimaryEmailAddress != null)
+                {
+                    // إزالة البريد الإلكتروني الأساسي إذا تم إرسال سلسلة فارغة/مسافات
+                    existingCustomer.PrimaryEmailId = null;
+                }
+                else if (dto.PrimaryEmailId.HasValue)
+                {
+                    // التعامل مع حالة إرسال PrimaryEmailId مباشرة
+                    if (dto.PrimaryEmailId.Value > 0)
+                    {
+                        // التحقق من وجود البريد الإلكتروني
+                        var emailExists = await _context.Emails
+                            .AnyAsync(e => e.Id == dto.PrimaryEmailId.Value && e.AccountId == accountId && e.EntityType == "Customer" && e.EntityId == id && e.IsActive);
+                        
+                        if (emailExists)
+                        {
+                            existingCustomer.PrimaryEmailId = dto.PrimaryEmailId.Value;
+                        }
+                        else
+                        {
+                            // البريد الإلكتروني غير موجود، لا تعدّل PrimaryEmailId
+                            existingCustomer.PrimaryEmailId = null;
+                        }
+                    }
+                    else
+                    {
+                        existingCustomer.PrimaryEmailId = null;
+                    }
+                }
+
+                // Validate existing PrimaryEmailId before saving
+                if (existingCustomer.PrimaryEmailId.HasValue && existingCustomer.PrimaryEmailId.Value > 0)
+                {
+                    // Check if the email still exists and is active
+                    var emailStillExists = await _context.Emails
+                        .AnyAsync(e => e.Id == existingCustomer.PrimaryEmailId.Value && e.AccountId == accountId && e.EntityType == "Customer" && e.EntityId == id && e.IsActive);
+                    
+                    if (!emailStillExists)
+                    {
+                        // Email no longer exists, clear the reference
+                        existingCustomer.PrimaryEmailId = null;
+                    }
+                }
+
+                existingCustomer.UpdatedAt = DateTime.UtcNow;
+                existingCustomer.UpdatedByUserId = GetUserId();
+
+                await _context.SaveChangesAsync();
+
+                // تسجيل النشاط
+                await _activityLog.LogAsync(accountId, GetUserId(), ActivityActions.UpdateCustomer, EntityTypes.Customer,
+                    existingCustomer.Id, existingCustomer.Name, $"تم تعديل العميل: {existingCustomer.Name}");
+
+                string? primaryEmailAddressResponse = null;
+                if (existingCustomer.PrimaryEmailId.HasValue)
+                {
+                    var primaryEmail = await _context.Emails
+                        .FirstOrDefaultAsync(e => e.Id == existingCustomer.PrimaryEmailId.Value && e.AccountId == accountId);
+                    primaryEmailAddressResponse = primaryEmail?.EmailAddress;
+                }
+
+                return Ok(new CustomerDto
+                {
+                    Id = existingCustomer.Id,
+                    AccountId = existingCustomer.AccountId,
+                    Code = existingCustomer.Code,
+                    Name = existingCustomer.Name,
+                    CountryId = existingCustomer.CountryId,
+                    CountryName = null,
+                    ProvinceId = existingCustomer.ProvinceId,
+                    ProvinceName = null,
+                    CityId = existingCustomer.CityId,
+                    CityName = null,
+                    Address = existingCustomer.Address,
+                    Type = existingCustomer.Type,
+                    Balance = existingCustomer.Balance,
+                    JoinDate = existingCustomer.JoinDate,
+                    Notes = existingCustomer.Notes,
+                    IsActive = existingCustomer.IsActive,
+                    IsVIP = existingCustomer.IsVIP,
+                    InvoiceCount = existingCustomer.InvoiceCount,
+                    TotalPurchases = existingCustomer.TotalPurchases,
+                    TotalPayments = existingCustomer.TotalPayments,
+                    PrimaryEmailId = existingCustomer.PrimaryEmailId,
+                    PrimaryEmailAddress = primaryEmailAddressResponse,
+                    CreatedAt = existingCustomer.CreatedAt,
+                    UpdatedAt = existingCustomer.UpdatedAt
+                });
             }
-
-            existingCustomer.Name = dto.Name ?? existingCustomer.Name;
-            existingCustomer.NameEn = dto.NameEn ?? existingCustomer.NameEn;
-            existingCustomer.Address = dto.Address ?? existingCustomer.Address;
-            existingCustomer.City = dto.City ?? existingCustomer.City;
-            existingCustomer.TaxNumber = dto.TaxNumber ?? existingCustomer.TaxNumber;
-            existingCustomer.Type = dto.Type ?? existingCustomer.Type;
-            existingCustomer.CreditLimit = dto.CreditLimit ?? existingCustomer.CreditLimit;
-            existingCustomer.Notes = dto.Notes ?? existingCustomer.Notes;
-            existingCustomer.UpdatedAt = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync();
-
-            // تسجيل النشاط
-            await _activityLog.LogAsync(accountId, GetUserId(), ActivityActions.UpdateCustomer, EntityTypes.Customer,
-                existingCustomer.Id, existingCustomer.Name, $"تم تعديل العميل: {existingCustomer.Name}");
-
-            return NoContent();
+            catch
+            {
+                return StatusCode(500, new { message = "حدث خطأ أثناء تحديث العميل" });
+            }
         }
 
         /// <summary>
@@ -396,13 +573,13 @@ namespace SmartAccountant.API.Controllers
                 return NotFound();
             }
 
-            // تسجيل النشاط
-            await _activityLog.LogAsync(accountId, GetUserId(), ActivityActions.DeleteCustomer, EntityTypes.Customer,
-                customer.Id, customer.Name, $"تم حذف العميل: {customer.Name}");
-
             customer.IsActive = false;
             customer.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
+
+            // تسجيل النشاط
+            await _activityLog.LogAsync(accountId, GetUserId(), ActivityActions.DeleteCustomer, EntityTypes.Customer,
+                customer.Id, customer.Name, $"تم حذف العميل: {customer.Name}");
 
             return NoContent();
         }
@@ -437,9 +614,7 @@ namespace SmartAccountant.API.Controllers
                 CustomerName = customer.Name,
                 TotalInvoices = totalInvoices,
                 TotalPaid = totalPaid,
-                Balance = totalInvoices - totalPaid,
-                CreditLimit = customer.CreditLimit,
-                AvailableCredit = customer.CreditLimit - (totalInvoices - totalPaid)
+                Balance = totalInvoices - totalPaid
             };
         }
     }
@@ -451,54 +626,80 @@ namespace SmartAccountant.API.Controllers
         public int AccountId { get; set; }
         public string Code { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
-        public string? NameEn { get; set; }
-        public string? ContactPerson { get; set; }
-        public string? Phone { get; set; }
-        public string? Phone2 { get; set; }
-        public string? Email { get; set; }
         public int? PrimaryPhoneId { get; set; }
         public int? SecondaryPhoneId { get; set; }
         public int? PrimaryEmailId { get; set; }
+        public string? PrimaryEmailAddress { get; set; }
+        public int? CountryId { get; set; }
+        public string? CountryName { get; set; }
+        public int? ProvinceId { get; set; }
+        public string? ProvinceName { get; set; }
+        public int? CityId { get; set; }
+        public string? CityName { get; set; }
         public string? Address { get; set; }
-        public string? City { get; set; }
-        public string? TaxNumber { get; set; }
         public CustomerType Type { get; set; }
-        public decimal CreditLimit { get; set; }
         public decimal Balance { get; set; }
+        public DateTime? JoinDate { get; set; }
+        public DateTime? LastPurchaseDate { get; set; }
+        public DateTime? LastPaymentDate { get; set; }
+        public decimal? TotalPurchases { get; set; }
+        public decimal? TotalPayments { get; set; }
+        public int InvoiceCount { get; set; }
         public string? Notes { get; set; }
         public bool IsActive { get; set; }
+        public bool IsVIP { get; set; }
         public DateTime CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+        public List<PhoneInfo> Phones { get; set; } = new();
+        public List<EmailInfo> Emails { get; set; } = new();
+    }
+    
+    public class PhoneInfo
+    {
+        public int Id { get; set; }
+        public string PhoneNumber { get; set; } = string.Empty;
+        public string PhoneType { get; set; } = string.Empty;
+        public bool IsPrimary { get; set; }
+        public bool IsSecondary { get; set; }
+        public bool IsActive { get; set; }
+    }
+    
+    public class EmailInfo
+    {
+        public int Id { get; set; }
+        public string EmailAddress { get; set; } = string.Empty;
+        public string EmailType { get; set; } = string.Empty;
+        public bool IsPrimary { get; set; }
+        public bool IsActive { get; set; }
     }
     
     public class CreateCustomerDto
     {
         public string? Code { get; set; }
         public string Name { get; set; } = string.Empty;
-        public string? NameEn { get; set; }
-        public string? ContactPerson { get; set; }
-        public string? Phone { get; set; }
-        public string? Phone2 { get; set; }
-        public string? Email { get; set; }
+        public int? CountryId { get; set; }
+        public int? ProvinceId { get; set; }
+        public int? CityId { get; set; }
         public string? Address { get; set; }
-        public string? City { get; set; }
-        public string? TaxNumber { get; set; }
         public CustomerType Type { get; set; } = CustomerType.Individual;
-        public decimal CreditLimit { get; set; }
+        public DateTime? JoinDate { get; set; }
         public string? Notes { get; set; }
+        public bool IsVIP { get; set; }
+        public int? PrimaryEmailId { get; set; }
+        public string? PrimaryEmailAddress { get; set; }
     }
     
     public class UpdateCustomerDto
     {
         public string? Name { get; set; }
-        public string? NameEn { get; set; }
-        public string? Phone { get; set; }
-        public string? Phone2 { get; set; }
-        public string? Email { get; set; }
+        public int? CountryId { get; set; }
+        public int? ProvinceId { get; set; }
+        public int? CityId { get; set; }
         public string? Address { get; set; }
-        public string? City { get; set; }
-        public string? TaxNumber { get; set; }
         public CustomerType? Type { get; set; }
-        public decimal? CreditLimit { get; set; }
         public string? Notes { get; set; }
+        public bool? IsVIP { get; set; }
+        public int? PrimaryEmailId { get; set; }
+        public string? PrimaryEmailAddress { get; set; }
     }
 }

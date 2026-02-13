@@ -303,13 +303,11 @@ namespace SmartAccountant.API.Controllers
                         c.Id,
                         c.Code,
                         c.Name,
-                        c.NameEn,
                         Phone = c.PrimaryPhone != null ? c.PrimaryPhone.Phone : null,
                         Email = c.PrimaryEmail != null ? c.PrimaryEmail.EmailAddress : null,
                         c.City,
                         c.Type,
                         c.Balance,
-                        c.CreditLimit,
                         c.CreatedAt
                     })
                     .ToListAsync();

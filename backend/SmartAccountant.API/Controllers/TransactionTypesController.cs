@@ -18,33 +18,46 @@ namespace SmartAccountant.API.Controllers
             _logger = logger;
         }
 
+        // Helper method to get AccountId from JWT claims
+        private int GetAccountId()
+        {
+            return int.Parse(User.FindFirst("accountId")?.Value ?? "0");
+        }
+
         /// <summary>
         /// الحصول على جميع أنواع المعاملات للحساب
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<TransactionTypeDto>>> GetTransactionTypes([FromQuery] int accountId = 1)
         {
-            var types = await _context.TransactionTypes
-                .Where(t => t.AccountId == accountId && t.IsActive)
-                .OrderBy(t => t.DisplayOrder)
-                .Select(t => new TransactionTypeDto
-                {
-                    Id = t.Id,
-                    AccountId = t.AccountId,
-                    Name = t.Name,
-                    NameEn = t.NameEn,
-                    Code = t.Code,
-                    Description = t.Description,
-                    Color = t.Color,
-                    Icon = t.Icon,
-                    IsSystem = t.IsSystem,
-                    DisplayOrder = t.DisplayOrder,
-                    IsActive = t.IsActive,
-                    ExpenseCount = t.Expenses.Count
-                })
-                .ToListAsync();
+            try
+            {
+                var types = await _context.TransactionTypes
+                    .Where(t => t.AccountId == accountId && t.IsActive)
+                    .OrderBy(t => t.DisplayOrder)
+                    .Select(t => new TransactionTypeDto
+                    {
+                        Id = t.Id,
+                        AccountId = t.AccountId,
+                        Name = t.Name,
+                        NameEn = t.NameEn,
+                        Code = t.Code,
+                        Description = t.Description,
+                        Color = t.Color,
+                        Icon = t.Icon,
+                        IsSystem = t.IsSystem,
+                        DisplayOrder = t.DisplayOrder,
+                        IsActive = t.IsActive,
+                        ExpenseCount = t.Expenses.Count
+                    })
+                    .ToListAsync();
 
-            return Ok(types);
+                return Ok(types);
+            }
+            catch
+            {
+                return Ok(new List<TransactionTypeDto>());
+            }
         }
 
         /// <summary>
@@ -53,8 +66,9 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<TransactionTypeDto>> GetTransactionType(int id)
         {
+            var accountId = GetAccountId();
             var type = await _context.TransactionTypes
-                .Where(t => t.Id == id)
+                .Where(t => t.Id == id && t.AccountId == accountId)
                 .Select(t => new TransactionTypeDto
                 {
                     Id = t.Id,
@@ -210,16 +224,47 @@ namespace SmartAccountant.API.Controllers
         [HttpPost("seed/{accountId}")]
         public async Task<ActionResult<IEnumerable<TransactionTypeDto>>> SeedTransactionTypes(int accountId, [FromQuery] int? userId = null)
         {
-            // التحقق من عدم وجود أنواع للحساب
-            var exists = await _context.TransactionTypes.AnyAsync(t => t.AccountId == accountId);
-            if (exists)
+            var existingTypes = await _context.TransactionTypes
+                .Where(t => t.AccountId == accountId)
+                .ToListAsync();
+
+            bool HasCode(string code) => existingTypes.Any(t => string.Equals(t.Code, code, StringComparison.OrdinalIgnoreCase));
+            TransactionType? FindByCode(string code) => existingTypes.FirstOrDefault(t => string.Equals(t.Code, code, StringComparison.OrdinalIgnoreCase));
+
+            var reactivatedCount = 0;
+
+            var existingExpense = FindByCode(TransactionTypeCodes.Expense);
+            if (existingExpense is not null && !existingExpense.IsActive)
             {
-                return BadRequest(new { message = "الأنواع الافتراضية موجودة مسبقاً لهذا الحساب" });
+                existingExpense.IsActive = true;
+                existingExpense.IsSystem = true;
+                existingExpense.UpdatedAt = DateTime.UtcNow;
+                reactivatedCount++;
             }
 
-            var defaultTypes = new List<TransactionType>
+            var existingPurchase = FindByCode(TransactionTypeCodes.Purchase);
+            if (existingPurchase is not null && !existingPurchase.IsActive)
             {
-                new TransactionType
+                existingPurchase.IsActive = true;
+                existingPurchase.IsSystem = true;
+                existingPurchase.UpdatedAt = DateTime.UtcNow;
+                reactivatedCount++;
+            }
+
+            var existingOtherIncome = FindByCode(TransactionTypeCodes.OtherIncome);
+            if (existingOtherIncome is not null && !existingOtherIncome.IsActive)
+            {
+                existingOtherIncome.IsActive = true;
+                existingOtherIncome.IsSystem = true;
+                existingOtherIncome.UpdatedAt = DateTime.UtcNow;
+                reactivatedCount++;
+            }
+
+            var typesToCreate = new List<TransactionType>();
+
+            if (!HasCode(TransactionTypeCodes.Expense))
+            {
+                typesToCreate.Add(new TransactionType
                 {
                     AccountId = accountId,
                     Name = "مصروفات",
@@ -233,8 +278,12 @@ namespace SmartAccountant.API.Controllers
                     IsActive = true,
                     CreatedByUserId = userId,
                     CreatedAt = DateTime.UtcNow
-                },
-                new TransactionType
+                });
+            }
+
+            if (!HasCode(TransactionTypeCodes.Purchase))
+            {
+                typesToCreate.Add(new TransactionType
                 {
                     AccountId = accountId,
                     Name = "مشتريات",
@@ -248,8 +297,12 @@ namespace SmartAccountant.API.Controllers
                     IsActive = true,
                     CreatedByUserId = userId,
                     CreatedAt = DateTime.UtcNow
-                },
-                new TransactionType
+                });
+            }
+
+            if (!HasCode(TransactionTypeCodes.OtherIncome))
+            {
+                typesToCreate.Add(new TransactionType
                 {
                     AccountId = accountId,
                     Name = "إيرادات أخرى",
@@ -263,13 +316,22 @@ namespace SmartAccountant.API.Controllers
                     IsActive = true,
                     CreatedByUserId = userId,
                     CreatedAt = DateTime.UtcNow
-                }
-            };
+                });
+            }
 
-            _context.TransactionTypes.AddRange(defaultTypes);
-            await _context.SaveChangesAsync();
+            if (typesToCreate.Count > 0 || reactivatedCount > 0)
+            {
+                _context.TransactionTypes.AddRange(typesToCreate);
+                await _context.SaveChangesAsync();
+            }
 
-            return Ok(defaultTypes.Select(t => new TransactionTypeDto
+            var allTypes = await _context.TransactionTypes
+                .Where(t => t.AccountId == accountId)
+                .OrderBy(t => t.DisplayOrder)
+                .ThenBy(t => t.Id)
+                .ToListAsync();
+
+            return Ok(allTypes.Select(t => new TransactionTypeDto
             {
                 Id = t.Id,
                 AccountId = t.AccountId,

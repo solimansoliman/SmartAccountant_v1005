@@ -1,12 +1,12 @@
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Plus, Trash2, Save, Search, Printer, FileText, AlertCircle, Package, Edit2, AlertTriangle, XCircle, Check, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, Eye, X, Loader2, Grid3X3, List, User, Calendar, CreditCard, Banknote, Clock, Store, Filter, RotateCcw } from 'lucide-react';
 import { useCustomers, useProducts, useInvoices, useAutoRefresh } from '../services/dataHooks';
 import { Invoice, InvoiceItem, PaymentType } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
-import { formatDateTime, formatDate } from '../services/dateService';
+import { formatDateTime, formatDate, formatTime } from '../services/dateService';
 import { printWithFileName } from '../services/fileNameService';
 import DateInput from '../components/DateInput';
 import { usePagePermission, useModulePermission } from '../services/permissionsHooks';
@@ -82,12 +82,20 @@ const SearchableSelect = ({ options, value, onChange, placeholder, disabled }: {
   );
 };
 
+const resolveMaxLength = (value: unknown, fallbackValue: number, minValue: number, maxValue: number) => {
+  const parsedValue = Number(value);
+  if (!Number.isFinite(parsedValue)) {
+    return fallbackValue;
+  }
+  return Math.min(maxValue, Math.max(minValue, Math.floor(parsedValue)));
+};
+
 type ViewMode = 'grid' | 'table';
 
 const Invoices: React.FC = () => {
   // ==================== Hooks أولاً (React requires all hooks before any return) ====================
   const { notify } = useNotification();
-  const { currency, defaultViewMode, autoRefreshEnabled, autoRefreshInterval } = useSettings();
+  const { currency, defaultViewMode, permissions } = useSettings();
   const { user } = useAuth();
   const [view, setView] = useState<'list' | 'create'>('list');
   
@@ -116,14 +124,12 @@ const Invoices: React.FC = () => {
   ], [refreshInvoices, refreshCustomers, refreshProducts]);
   
   const { 
-    countdown, 
     isRefreshing, 
-    manualRefresh,
-    enabled: autoRefreshActive 
+    manualRefresh
   } = useAutoRefresh(
     refreshCallbacks(),
-    autoRefreshInterval,
-    autoRefreshEnabled && view === 'list' // فقط عند عرض القائمة
+    30,
+    false // التحديث التلقائي معطّل هنا: يُسمح به فقط في Dashboard
   );
   
   // List View State
@@ -151,13 +157,34 @@ const Invoices: React.FC = () => {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
 
+  const getTodayDateValue = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const buildLocalInvoiceDateTime = (dateValue: string) => {
+    const now = new Date();
+    const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(dateValue) ? dateValue : getTodayDateValue();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    return `${safeDate}T${hours}:${minutes}:${seconds}`;
+  };
+
   // Form State
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentType, setPaymentType] = useState<PaymentType>(PaymentType.CASH);
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const [currentPaidAmount, setCurrentPaidAmount] = useState<number>(0);
+  const [isPaidAmountManual, setIsPaidAmountManual] = useState(false);
   const [invoiceNotes, setInvoiceNotes] = useState('');
+
+  const invoiceNotesMaxLength = resolveMaxLength((permissions as any).invoiceNotesMaxLength, 300, 20, 1000);
+  const invoiceNotesRemaining = invoiceNotesMaxLength - invoiceNotes.length;
   
   // Item Input State
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -165,6 +192,11 @@ const Invoices: React.FC = () => {
   const [itemQty, setItemQty] = useState(1);
   const [itemPrice, setItemPrice] = useState(0);
   const [itemUnit, setItemUnit] = useState('قطعة');
+
+  const selectedProduct = useMemo(
+    () => products.find(p => String(p.id) === selectedProductId) || null,
+    [products, selectedProductId],
+  );
   
   // ==================== صلاحيات الصفحة (بعد كل الـ hooks) ====================
   const pagePerms = usePagePermission('invoices');
@@ -365,29 +397,50 @@ const Invoices: React.FC = () => {
 
   const saveItem = () => {
     const quantity = Number(itemQty);
-    const price = Number(itemPrice);
+    if (!selectedProductId) {
+      notify('الرجاء اختيار المنتج من القائمة', 'warning');
+      return;
+    }
 
-    if (!itemName || price <= 0 || quantity <= 0) {
-        notify('الرجاء إدخال اسم الصنف، السعر، والكمية بشكل صحيح', 'warning');
+    if (!selectedProduct) {
+      notify('المنتج المختار غير موجود', 'error');
+      return;
+    }
+
+    const itemNameFromProduct = selectedProduct.name;
+    const priceFromProduct = Number(selectedProduct.price || 0);
+    const unitFromProduct = (typeof selectedProduct.unit === 'object' && selectedProduct.unit)
+      ? (selectedProduct.unit as any).name
+      : (selectedProduct.unit || itemUnit || 'قطعة');
+
+    if (!itemNameFromProduct || priceFromProduct <= 0 || quantity <= 0) {
+      notify('تحقق من سعر المنتج والكمية قبل الإضافة', 'warning');
         return;
     }
 
-    const lineTotal = Number((quantity * price).toFixed(2));
+    const lineTotal = Number((quantity * priceFromProduct).toFixed(2));
 
     if (editingItemId) {
         // UPDATE Existing Item
         setItems(prevItems => prevItems.map(item => 
             item.id === editingItemId 
-            ? { ...item, productId: selectedProductId || undefined, name: itemName, quantity, price, unit: itemUnit, total: lineTotal }
+        ? {
+          ...item,
+          productId: selectedProductId,
+          name: itemNameFromProduct,
+          quantity,
+          price: priceFromProduct,
+          unit: unitFromProduct,
+          total: lineTotal,
+          }
             : item
         ));
         notify('تم تعديل الصنف بنجاح', 'success');
         cancelEditItem();
     } else {
-        // التحقق إذا كان المنتج موجود مسبقاً (بنفس المنتج والسعر)
+      // دمج نفس المنتج تلقائياً بدلاً من تكرار نفس السطر.
         const existingItemIndex = items.findIndex(item => 
-            (selectedProductId && item.productId === selectedProductId) || 
-            (!selectedProductId && item.name === itemName && item.price === price)
+        item.productId === selectedProductId
         );
 
         if (existingItemIndex !== -1) {
@@ -395,8 +448,15 @@ const Invoices: React.FC = () => {
             setItems(prevItems => prevItems.map((item, index) => {
                 if (index === existingItemIndex) {
                     const newQty = item.quantity + quantity;
-                    const newTotal = Number((newQty * item.price).toFixed(2));
-                    return { ...item, quantity: newQty, total: newTotal };
+            const newTotal = Number((newQty * priceFromProduct).toFixed(2));
+            return {
+              ...item,
+              name: itemNameFromProduct,
+              quantity: newQty,
+              price: priceFromProduct,
+              unit: unitFromProduct,
+              total: newTotal,
+            };
                 }
                 return item;
             }));
@@ -405,11 +465,11 @@ const Invoices: React.FC = () => {
             // ADD New Item
             const newItem: InvoiceItem = {
                 id: Math.random().toString(36).substr(2, 9),
-                productId: selectedProductId || undefined,
-                name: itemName,
+              productId: selectedProductId,
+              name: itemNameFromProduct,
                 quantity: quantity,
-                price: price,
-                unit: itemUnit,
+              price: priceFromProduct,
+              unit: unitFromProduct,
                 total: lineTotal
             };
             setItems([...items, newItem]);
@@ -468,7 +528,9 @@ const Invoices: React.FC = () => {
       setEditingInvoiceId(null);
       setItems([]);
       setCurrentPaidAmount(0);
+      setIsPaidAmountManual(false);
       setSelectedCustomerId('');
+      setDate(getTodayDateValue());
       setInvoiceNotes('');
       cancelEditItem();
       setShowSaveConfirmation(false);
@@ -478,6 +540,11 @@ const Invoices: React.FC = () => {
   const handleSaveRequest = () => {
     if (!selectedCustomerId || items.length === 0) {
       notify('الرجاء اختيار عميل وإضافة صنف واحد على الأقل', 'error');
+      return;
+    }
+
+    if (invoiceNotes.length > invoiceNotesMaxLength) {
+      notify(`ملاحظات الفاتورة تتجاوز الحد المسموح (${invoiceNotesMaxLength})`, 'error');
       return;
     }
     
@@ -500,11 +567,8 @@ const Invoices: React.FC = () => {
     // استخدام المبلغ المدفوع المحدد من المستخدم
     const actualPaidAmount = currentPaidAmount;
 
-    // دمج التاريخ المختار مع الوقت الحالي
-    const now = new Date();
-    const selectedDate = new Date(date);
-    selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
-    const dateTimeString = selectedDate.toISOString();
+    // دمج تاريخ الفاتورة مع الوقت المحلي الحالي (بدون تحويل UTC)
+    const dateTimeString = buildLocalInvoiceDateTime(date);
 
     try {
       if (editingInvoiceId) {
@@ -550,6 +614,23 @@ const Invoices: React.FC = () => {
 
   // Calculations
   const totalInvoice = items.reduce((sum, item) => sum + item.total, 0);
+
+  useEffect(() => {
+    if (editingInvoiceId) return;
+
+    if (paymentType === PaymentType.CASH) {
+      setCurrentPaidAmount(prev => {
+        const next = isPaidAmountManual ? Math.min(prev, totalInvoice) : totalInvoice;
+        return prev === next ? prev : next;
+      });
+      return;
+    }
+
+    setCurrentPaidAmount(prev => {
+      const next = Math.min(prev, totalInvoice);
+      return prev === next ? prev : next;
+    });
+  }, [paymentType, totalInvoice, editingInvoiceId, isPaidAmountManual]);
 
   // Helper for invoice detail view
   const viewingInvoice = useMemo(() => invoices.find(i => String(i.id) === viewInvoiceId), [invoices, viewInvoiceId]);
@@ -776,7 +857,15 @@ const Invoices: React.FC = () => {
                      {/* رقم الفاتورة والتاريخ */}
                      <div className="text-left">
                        <p className="text-lg font-bold text-primary print:text-black">{viewingInvoice.invoiceNumber || `#${viewingInvoice.id}`}</p>
-                       <p className="text-sm text-slate-500 print:text-gray-500">{formatDateTime(viewingInvoice.date)}</p>
+                       <p className="text-sm print:text-gray-500 inline-flex items-center gap-1.5">
+                         <span className="text-slate-600 dark:text-slate-300 print:text-black">{formatDate(viewingInvoice.date)}</span>
+                         {formatTime(viewingInvoice.date) !== '-' && (
+                           <>
+                             <span className="text-slate-300 dark:text-slate-600 print:text-gray-400">|</span>
+                            <span className="text-sky-500 dark:text-sky-300 print:text-black">{formatTime(viewingInvoice.date)}</span>
+                           </>
+                         )}
+                       </p>
                      </div>
                  </div>
 
@@ -986,8 +1075,10 @@ const Invoices: React.FC = () => {
                         onClick={() => {
                             setEditingInvoiceId(null);
                             setSelectedCustomerId('');
+                            setDate(getTodayDateValue());
                             setItems([]);
                             setCurrentPaidAmount(0);
+                            setIsPaidAmountManual(false);
                             setInvoiceNotes('');
                             setView('create');
                         }}
@@ -1127,7 +1218,17 @@ const Invoices: React.FC = () => {
                         </td>
                         <td className="p-4 text-primary dark:text-blue-400 font-bold print:text-black print:p-1.5 print:border print:border-gray-300 print:font-normal">{inv.invoiceNumber || `#${inv.id}`}</td>
                         <td className="p-4 font-medium text-slate-800 dark:text-slate-200 print:p-1.5 print:border print:border-gray-300 print:font-normal print:text-black">{inv.customerName}</td>
-                        <td className="p-4 text-slate-500 dark:text-slate-400 print:p-1.5 print:border print:border-gray-300 print:text-black">{formatDateTime(inv.date)}</td>
+                        <td className="p-4 print:p-1.5 print:border print:border-gray-300 print:text-black">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="text-slate-600 dark:text-slate-300 print:text-black">{formatDate(inv.date)}</span>
+                            {formatTime(inv.date) !== '-' && (
+                              <>
+                                <span className="text-slate-300 dark:text-slate-600 print:text-gray-400">|</span>
+                                <span className="text-sky-500 dark:text-sky-300 print:text-black">{formatTime(inv.date)}</span>
+                              </>
+                            )}
+                          </span>
+                        </td>
                         <td className="p-4 font-bold text-slate-800 dark:text-white print:p-1.5 print:border print:border-gray-300 print:font-semibold print:text-black print:text-center">{inv.totalAmount.toLocaleString()}</td>
                         <td className="p-4 text-emerald-600 dark:text-emerald-400 print:p-1.5 print:border print:border-gray-300 print:text-black print:text-center">{inv.paidAmount.toLocaleString()}</td>
                         <td className="p-4 text-rose-600 dark:text-rose-400 font-bold print:p-1.5 print:border print:border-gray-300 print:font-semibold print:text-black print:text-center">{inv.remainingAmount.toLocaleString()}</td>
@@ -1168,9 +1269,15 @@ const Invoices: React.FC = () => {
                       <h4 className="font-bold text-slate-800 dark:text-white truncate">{inv.customerName}</h4>
                     </div>
                     
-                    <div className="flex items-center gap-2 mb-3 text-xs text-slate-500 dark:text-slate-400">
+                    <div className="flex items-center gap-2 mb-3 text-xs">
                       <Calendar size={12} />
-                      {formatDateTime(inv.date)}
+                      <span className="text-slate-600 dark:text-slate-300">{formatDate(inv.date)}</span>
+                      {formatTime(inv.date) !== '-' && (
+                        <>
+                          <span className="text-slate-300 dark:text-slate-600">|</span>
+                          <span className="text-sky-500 dark:text-sky-300">{formatTime(inv.date)}</span>
+                        </>
+                      )}
                     </div>
                     
                     <div className="grid grid-cols-3 gap-2 mb-3 text-center">
@@ -1304,14 +1411,15 @@ const Invoices: React.FC = () => {
                 </div>
 
               {/* Add Item Section */}
-              <div className={`bg-slate-50 dark:bg-slate-700/50 p-4 rounded-xl border-2 ${editingItemId ? 'border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/10' : 'border-slate-200 dark:border-slate-600'} mb-6`}>
-                 <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${editingItemId ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                <div className={`bg-slate-50 dark:bg-slate-700/50 p-4 rounded-xl border-2 ${editingItemId ? 'border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/10' : 'border-slate-200 dark:border-slate-600'} mb-6`}>
+                  <h4 className={`text-sm font-bold mb-1 flex items-center gap-2 ${editingItemId ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>
                      <Package size={16} className={editingItemId ? 'text-amber-500' : 'text-purple-500'} />
                      {editingItemId ? 'تعديل الصنف المحدد' : 'إضافة أصناف للفاتورة'}
                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">اختر المنتج ثم أدخل الكمية، وسيتم اعتماد الاسم والسعر تلقائياً.</p>
                  
-                 <div className="grid grid-cols-1 md:grid-cols-12 gap-3 mb-3">
-                     <div className="md:col-span-4">
+                  <div className="grid grid-cols-1 md:grid-cols-10 gap-3">
+                   <div className="md:col-span-6">
                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">المنتج (بحث)</label>
                          <SearchableSelect 
                             options={products.map(p => ({ id: String(p.id), label: p.name, subLabel: `${p.price} ${currency}` }))}
@@ -1321,17 +1429,7 @@ const Invoices: React.FC = () => {
                             disabled={isLoading}
                          />
                      </div>
-                     <div className="md:col-span-3">
-                         <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">اسم الصنف</label>
-                         <input 
-                            type="text" 
-                            className="w-full border p-2 rounded text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white dark:border-slate-600" 
-                            value={itemName} 
-                            onChange={e => setItemName(e.target.value)}
-                            placeholder="اسم المنتج"
-                         />
-                     </div>
-                     <div className="md:col-span-2">
+                   <div className="md:col-span-2">
                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">الكمية</label>
                          <input 
                             type="number" 
@@ -1341,24 +1439,23 @@ const Invoices: React.FC = () => {
                             min="1"
                          />
                      </div>
-                     <div className="md:col-span-2">
+                   <div className="md:col-span-2">
                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">السعر</label>
-                         <input 
-                            type="number" 
-                            className="w-full border p-2 rounded text-center text-sm font-bold bg-white dark:bg-slate-700 text-slate-900 dark:text-white dark:border-slate-600" 
-                            value={itemPrice} 
-                            onChange={e => setItemPrice(Number(e.target.value))}
-                            min="0"
-                         />
+                         <div className="w-full border p-2 rounded text-center text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-600 min-h-[42px] flex items-center justify-center">
+                           {(selectedProduct ? Number(selectedProduct.price || 0) : itemPrice).toLocaleString()} {currency}
+                         </div>
+                         <p className="mt-1 text-[10px] text-slate-500">لتعديل السعر: شاشة المنتجات ← تعديل منتج</p>
                      </div>
-                     <div className="md:col-span-1 flex items-end">
-                         <button 
-                            onClick={saveItem}
-                            className={`w-full p-2 rounded text-white flex justify-center items-center transition-colors ${editingItemId ? 'bg-amber-500 hover:bg-amber-600' : 'bg-slate-800 hover:bg-slate-700'}`}
-                         >
-                             {editingItemId ? <Check size={18}/> : <Plus size={18}/>}
-                         </button>
-                     </div>
+                 </div>
+                 <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600 flex justify-end">
+                   <button
+                     onClick={saveItem}
+                     disabled={isLoading || !selectedProductId || itemQty <= 0}
+                     className={`h-[42px] min-w-[170px] px-4 rounded-xl text-white flex justify-center items-center gap-2 text-sm font-bold transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed ${editingItemId ? 'bg-amber-500 hover:bg-amber-600' : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700'}`}
+                   >
+                     {editingItemId ? <Check size={16} /> : <Plus size={16} />}
+                     <span>{editingItemId ? 'حفظ التعديل' : 'إضافة الصنف'}</span>
+                   </button>
                  </div>
                  {editingItemId && (
                      <div className="flex justify-end">
@@ -1431,6 +1528,7 @@ const Invoices: React.FC = () => {
                              <button 
                                 onClick={() => {
                                     setPaymentType(PaymentType.CASH);
+                                setIsPaidAmountManual(false);
                                     setCurrentPaidAmount(totalInvoice); // كاش = مدفوع بالكامل
                                 }}
                                 className={`flex-1 py-2 text-sm font-bold rounded transition-all ${paymentType === PaymentType.CASH ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
@@ -1440,6 +1538,7 @@ const Invoices: React.FC = () => {
                              <button 
                                 onClick={() => {
                                     setPaymentType(PaymentType.CREDIT);
+                                setIsPaidAmountManual(false);
                                     setCurrentPaidAmount(0); // آجل = يبدأ من صفر
                                 }}
                                 className={`flex-1 py-2 text-sm font-bold rounded transition-all ${paymentType === PaymentType.CREDIT ? 'bg-amber-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
@@ -1458,7 +1557,10 @@ const Invoices: React.FC = () => {
                             type="number" 
                             className="w-full bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-600 rounded p-2 text-slate-900 dark:text-white text-center font-bold outline-none focus:border-amber-500 transition-colors"
                             value={currentPaidAmount}
-                            onChange={e => setCurrentPaidAmount(Math.min(Number(e.target.value), totalInvoice))}
+                           onChange={e => {
+                            setIsPaidAmountManual(true);
+                            setCurrentPaidAmount(Math.min(Number(e.target.value), totalInvoice));
+                           }}
                             placeholder="0.00"
                             max={totalInvoice}
                          />
@@ -1477,7 +1579,10 @@ const Invoices: React.FC = () => {
                             type="number" 
                             className="w-full bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-600 rounded p-2 text-slate-900 dark:text-white text-center font-bold outline-none focus:border-emerald-500 transition-colors"
                             value={currentPaidAmount}
-                            onChange={e => setCurrentPaidAmount(Math.min(Number(e.target.value), totalInvoice))}
+                           onChange={e => {
+                            setIsPaidAmountManual(true);
+                            setCurrentPaidAmount(Math.min(Number(e.target.value), totalInvoice));
+                           }}
                             placeholder="0.00"
                             max={totalInvoice}
                          />
@@ -1497,12 +1602,18 @@ const Invoices: React.FC = () => {
              </div>
 
              <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700">
-                 <label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-2">ملاحظات الفاتورة</label>
+                 <label className="flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-400 mb-2">
+                   <span>ملاحظات الفاتورة</span>
+                   <span className={`mr-auto text-xs font-medium ${invoiceNotesRemaining <= 20 ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400'}`}>
+                     المتبقي: {invoiceNotesRemaining}
+                   </span>
+                 </label>
                  <textarea 
                     className="w-full border border-slate-300 dark:border-slate-600 rounded-lg p-3 text-sm h-32 resize-none outline-none focus:border-primary bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                     placeholder="شروط الدفع، ملاحظات التسليم..."
                     value={invoiceNotes}
-                    onChange={e => setInvoiceNotes(e.target.value)}
+                    onChange={e => setInvoiceNotes(e.target.value.slice(0, invoiceNotesMaxLength))}
+                    maxLength={invoiceNotesMaxLength}
                  ></textarea>
              </div>
           </div>

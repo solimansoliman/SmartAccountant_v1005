@@ -216,6 +216,27 @@ namespace SmartAccountant.API.Controllers
 
             return NoContent();
         }
+
+        /// <summary>
+        /// حذف جميع إشعارات المستخدم الحالي
+        /// </summary>
+        [HttpDelete("clear-all")]
+        public async Task<IActionResult> DeleteAllNotifications()
+        {
+            var accountId = GetAccountId();
+            var userId = GetUserId();
+
+            if (!userId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            await _context.Notifications
+                .Where(n => n.AccountId == accountId && n.UserId == userId.Value)
+                .ExecuteDeleteAsync();
+
+            return NoContent();
+        }
     }
 
     public class CreateNotificationDto

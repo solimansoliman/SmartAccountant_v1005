@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SmartAccountant.API")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a8b94b5804a892e9e956198936896f22278ec5c0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+14ff4ac26dd72e893e5372f8f9e25b6bf0bd3395")]
 [assembly: System.Reflection.AssemblyProductAttribute("SmartAccountant.API")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SmartAccountant.API")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

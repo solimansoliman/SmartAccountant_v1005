@@ -19,6 +19,12 @@ namespace SmartAccountant.API.Controllers
             _activityLog = activityLog;
         }
 
+        // Helper method to get AccountId from JWT claims
+        private int GetAccountId()
+        {
+            return int.Parse(User.FindFirst("accountId")?.Value ?? "0");
+        }
+
         private int GetUserId()
         {
             if (Request.Headers.TryGetValue("X-User-Id", out var userIdHeader) && 
@@ -99,8 +105,9 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<object>> GetRole(int id)
         {
+            var accountId = GetAccountId();
             var role = await _context.Roles
-                .Where(r => r.Id == id)
+                .Where(r => r.Id == id && r.AccountId == accountId)
                 .Select(r => new
                 {
                     r.Id,
@@ -146,9 +153,17 @@ namespace SmartAccountant.API.Controllers
         [HttpPost]
         public async Task<ActionResult<Role>> CreateRole([FromBody] CreateRoleDto dto)
         {
+            var normalizedName = dto.Name?.Trim() ?? string.Empty;
+            if (dto.AccountId <= 0 || string.IsNullOrWhiteSpace(normalizedName))
+                return BadRequest(new { message = "بيانات الدور غير مكتملة" });
+
+            var accountExists = await _context.Accounts.AnyAsync(a => a.Id == dto.AccountId);
+            if (!accountExists)
+                return BadRequest(new { message = "الحساب المحدد غير موجود" });
+
             // التحقق من عدم وجود دور بنفس الاسم
             var exists = await _context.Roles.AnyAsync(r => 
-                r.AccountId == dto.AccountId && r.Name == dto.Name);
+                r.AccountId == dto.AccountId && r.Name == normalizedName);
                 
             if (exists)
                 return BadRequest(new { message = "يوجد دور بنفس الاسم" });
@@ -156,7 +171,7 @@ namespace SmartAccountant.API.Controllers
             var role = new Role
             {
                 AccountId = dto.AccountId,
-                Name = dto.Name,
+                Name = normalizedName,
                 NameEn = dto.NameEn,
                 Description = dto.Description,
                 Color = dto.Color ?? "#6366f1",
@@ -165,8 +180,23 @@ namespace SmartAccountant.API.Controllers
                 IsActive = true
             };
 
-            _context.Roles.Add(role);
-            await _context.SaveChangesAsync();
+            try
+            {
+                _context.Roles.Add(role);
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex)
+            {
+                var rootMessage = ex.InnerException?.Message ?? ex.Message;
+                if (rootMessage.Contains("IX_Roles_AccountId_Name", StringComparison.OrdinalIgnoreCase)
+                    || rootMessage.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
+                    || rootMessage.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest(new { message = "يوجد دور بنفس الاسم" });
+                }
+
+                return StatusCode(500, new { message = "تعذر إنشاء الدور بسبب خطأ في قاعدة البيانات" });
+            }
 
             // إضافة الصلاحيات إن وجدت
             if (dto.PermissionIds?.Any() == true)

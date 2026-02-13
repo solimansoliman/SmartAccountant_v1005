@@ -20,6 +20,7 @@ namespace SmartAccountant.API.Models
         public decimal ConversionFactor { get; set; } = 1;
         public bool IsActive { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
         
         // من أنشأ السجل
         public int? CreatedByUserId { get; set; }

@@ -9,10 +9,18 @@ import AccessDenied from '../components/AccessDenied';
 
 type ViewMode = 'grid' | 'table';
 
+const resolveMaxLength = (value: unknown, fallbackValue: number, minValue: number, maxValue: number) => {
+  const parsedValue = Number(value);
+  if (!Number.isFinite(parsedValue)) {
+    return fallbackValue;
+  }
+  return Math.min(maxValue, Math.max(minValue, Math.floor(parsedValue)));
+};
+
 const Products: React.FC = () => {
   // ==================== Hooks أولاً (React requires all hooks before any return) ====================
   const { notify } = useNotification();
-  const { currency, defaultViewMode } = useSettings();
+  const { currency, defaultViewMode, permissions } = useSettings();
   const [view, setView] = useState<'list' | 'create'>('list');
   
   // View Mode State - يستخدم الإعداد الافتراضي من النظام
@@ -71,6 +79,12 @@ const Products: React.FC = () => {
   const [formUnit, setFormUnit] = useState('قطعة');
   const [formNotes, setFormNotes] = useState('');
   const [formLoading, setFormLoading] = useState(false);
+
+  const productNameMaxLength = resolveMaxLength((permissions as any).productNameMaxLength, 120, 20, 200);
+  const productNotesMaxLength = resolveMaxLength((permissions as any).productNotesMaxLength, 300, 20, 500);
+
+  const productNameRemaining = productNameMaxLength - formName.length;
+  const productNotesRemaining = productNotesMaxLength - formNotes.length;
   
   // Confirmation States
   const [pendingEditProduct, setPendingEditProduct] = useState<typeof products[0] | null>(null);
@@ -83,19 +97,55 @@ const Products: React.FC = () => {
     );
   }, [products, searchQuery]);
 
+  const unitRows = useMemo(() => {
+    const apiRows = fullUnits.map(unit => ({ ...unit, isLegacyDefault: false }));
+    const existingNames = new Set(
+      apiRows
+        .map(unit => (unit.name || '').trim().toLowerCase())
+        .filter(name => name.length > 0)
+    );
+
+    const legacyRows = availableUnits
+      .map(name => name.trim())
+      .filter(name => name.length > 0)
+      .filter(name => !existingNames.has(name.toLowerCase()))
+      .map((name, index) => ({
+        id: -(index + 1),
+        name,
+        nameEn: '',
+        symbol: name,
+        isBase: true,
+        conversionFactor: 1,
+        isActive: true,
+        isLegacyDefault: true,
+      }));
+
+    return [...apiRows, ...legacyRows];
+  }, [availableUnits, fullUnits]);
+
   // Filtered Units List
   const filteredUnits = useMemo(() => {
-      return fullUnits.filter(u => 
+      return unitRows.filter(u => 
         u.name.toLowerCase().includes(unitSearch.toLowerCase()) ||
         (u.nameEn || '').toLowerCase().includes(unitSearch.toLowerCase()) ||
-        u.symbol.toLowerCase().includes(unitSearch.toLowerCase())
+        (u.symbol || '').toLowerCase().includes(unitSearch.toLowerCase())
       );
-  }, [fullUnits, unitSearch]);
+  }, [unitRows, unitSearch]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName || !formPrice) {
       notify('الرجاء إدخال اسم المنتج والسعر', 'warning');
+      return;
+    }
+
+    if (formName.length > productNameMaxLength) {
+      notify(`اسم المنتج يتجاوز الحد المسموح (${productNameMaxLength})`, 'error');
+      return;
+    }
+
+    if (formNotes.length > productNotesMaxLength) {
+      notify(`ملاحظات المنتج تتجاوز الحد المسموح (${productNotesMaxLength})`, 'error');
       return;
     }
 
@@ -223,9 +273,13 @@ const Products: React.FC = () => {
     }
   };
 
-  const startEditUnit = (unit: typeof fullUnits[0]) => {
+  const startEditUnit = (unit: { id?: number; name: string; nameEn?: string; symbol: string; isLegacyDefault?: boolean }) => {
+    if (!unit.id || unit.id <= 0 || unit.isLegacyDefault) {
+      return;
+    }
+
     setEditingUnit({
-      id: unit.id!,
+      id: unit.id,
       name: unit.name,
       nameEn: unit.nameEn || '',
       symbol: unit.symbol
@@ -384,8 +438,8 @@ const Products: React.FC = () => {
                  </div>
                  
                  {filteredUnits.map((unit) => (
-                     <div key={unit.id} className="grid grid-cols-4 gap-2 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-b border-slate-100 dark:border-slate-700 last:border-0 items-center text-sm transition-colors">
-                         {editingUnit?.id === unit.id ? (
+                   <div key={`${unit.id ?? unit.name}-${unit.name}`} className="grid grid-cols-4 gap-2 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-b border-slate-100 dark:border-slate-700 last:border-0 items-center text-sm transition-colors">
+                     {!unit.isLegacyDefault && editingUnit?.id === unit.id ? (
                              <>
                                  <input 
                                     type="text" 
@@ -413,24 +467,35 @@ const Products: React.FC = () => {
                              </>
                          ) : (
                              <>
-                                <span className="font-semibold text-slate-700 dark:text-slate-200">{unit.name}</span>
+                                <span className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                                  {unit.name}
+                                  {unit.isLegacyDefault && (
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">افتراضية</span>
+                                  )}
+                                </span>
                                 <span className="text-slate-500 dark:text-slate-400">{unit.nameEn || '-'}</span>
                                 <span className="text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-xs">{unit.symbol}</span>
                                 <div className="flex gap-1.5 justify-center">
-                                    <button 
-                                      onClick={() => startEditUnit(unit)}
-                                      className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-                                      title="تعديل"
-                                    >
-                                        <Edit2 size={16} />
-                                    </button>
-                                    <button 
-                                      onClick={() => requestDeleteUnit({id: unit.id!, name: unit.name})}
-                                      className="p-2 text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
-                                      title="حذف"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
+                                    {!unit.isLegacyDefault && unit.id && unit.id > 0 ? (
+                                      <>
+                                        <button 
+                                          onClick={() => startEditUnit(unit)}
+                                          className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                                          title="تعديل"
+                                        >
+                                            <Edit2 size={16} />
+                                        </button>
+                                        <button 
+                                          onClick={() => requestDeleteUnit({id: unit.id!, name: unit.name})}
+                                          className="p-2 text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
+                                          title="حذف"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <span className="text-xs text-slate-400 dark:text-slate-500">عرض فقط</span>
+                                    )}
                                 </div>
                              </>
                          )}
@@ -807,13 +872,17 @@ const Products: React.FC = () => {
                   <Package size={16} className="text-emerald-500" />
                   اسم المنتج
                   <span className="text-rose-500">*</span>
+                  <span className={`mr-auto text-xs font-medium ${productNameRemaining <= 10 ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400'}`}>
+                    المتبقي: {productNameRemaining}
+                  </span>
                 </label>
                 <div className="relative">
                   <input 
                     type="text" 
                     className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 pr-11 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white placeholder:text-slate-400 transition-all"
                     value={formName}
-                    onChange={e => setFormName(e.target.value)}
+                    onChange={e => setFormName(e.target.value.slice(0, productNameMaxLength))}
+                    maxLength={productNameMaxLength}
                     placeholder="مثال: قهوة عربية..."
                   />
                   <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400">
@@ -906,11 +975,15 @@ const Products: React.FC = () => {
                   <Edit2 size={16} className="text-slate-500" />
                   ملاحظات
                   <span className="text-slate-400 text-xs font-normal">(اختياري)</span>
+                  <span className={`mr-auto text-xs font-medium ${productNotesRemaining <= 20 ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400'}`}>
+                    المتبقي: {productNotesRemaining}
+                  </span>
                 </label>
                 <textarea 
                   className="w-full border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-slate-500/20 focus:border-slate-400 dark:focus:border-slate-500 outline-none bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white placeholder:text-slate-400 resize-none h-28 transition-all"
                   value={formNotes}
-                  onChange={e => setFormNotes(e.target.value)}
+                  onChange={e => setFormNotes(e.target.value.slice(0, productNotesMaxLength))}
+                  maxLength={productNotesMaxLength}
                   placeholder="أضف وصفاً أو ملاحظات إضافية للمنتج..."
                 />
               </div>

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Mail, Send, Inbox, CheckCheck, Trash2, Loader2, AlertTriangle, Clock, User, ChevronLeft, X, Plus, Search, RefreshCw, Users, Building2, Globe, Calendar } from 'lucide-react';
-import { messagesApi, ApiMessage, getBaseUrl } from '../services/apiService';
+import { messagesApi, ApiMessage } from '../services/apiService';
 import { useNotification } from '../context/NotificationContext';
 import { formatDateTime, formatDate, formatTime } from '../services/dateService';
 import { usePagePermission } from '../services/permissionsHooks';
 import AccessDenied from '../components/AccessDenied';
+import AccessibleModal from '../components/AccessibleModal';
 
 interface UserItem {
   id: number;
@@ -24,7 +25,7 @@ interface AccountItem {
 type SendMode = 'single' | 'all' | 'account';
 
 const Messages: React.FC = () => {
-  const { notify } = useNotification();
+  const { notify, refreshNotifications } = useNotification();
   const [messages, setMessages] = useState<ApiMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [folder, setFolder] = useState<'inbox' | 'sent'>('inbox');
@@ -44,17 +45,10 @@ const Messages: React.FC = () => {
   const [priority, setPriority] = useState<'Low' | 'Normal' | 'High' | 'Urgent'>('Normal');
   const [searchQuery, setSearchQuery] = useState('');
   const [userSearchQuery, setUserSearchQuery] = useState('');
-  
-  // تحديد فترة سنة كقيمة افتراضية
-  const getDefaultDateFrom = () => {
-    const d = new Date();
-    d.setFullYear(d.getFullYear() - 1);
-    return d.toISOString().split('T')[0];
-  };
-  const getDefaultDateTo = () => new Date().toISOString().split('T')[0];
-  
-  const [dateFrom, setDateFrom] = useState(getDefaultDateFrom);
-  const [dateTo, setDateTo] = useState(getDefaultDateTo);
+
+  // بدون فلترة تاريخ افتراضية حتى لا يتم إخفاء الرسائل تلقائيا
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   // حدود عدد الحروف
   const [maxMessageLength, setMaxMessageLength] = useState<number>(1000);
@@ -63,36 +57,30 @@ const Messages: React.FC = () => {
   // ==================== صلاحيات الصفحة ====================
   const pagePerms = usePagePermission('messages');
 
+  const refreshUnreadBadge = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('messages:refresh-unread'));
+  }, []);
+
   const fetchMessages = useCallback(async () => {
     setLoading(true);
     try {
       const data = await messagesApi.getAll({ folder });
       setMessages(data);
+      refreshUnreadBadge();
     } catch (err: any) {
       console.warn('فشل في جلب الرسائل:', err.message);
       setMessages([]);
     } finally {
       setLoading(false);
     }
-  }, [folder]);
+  }, [folder, refreshUnreadBadge]);
 
   // جلب حدود عدد الحروف
   const fetchLimits = useCallback(async () => {
     try {
-      const token = localStorage.getItem('token');
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-        'X-Account-Id': localStorage.getItem('accountId') || '1',
-        'X-User-Id': localStorage.getItem('userId') || '',
-      };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const response = await fetch(`${getBaseUrl()}/messages/limits`, { headers });
-      if (response.ok) {
-        const data = await response.json();
-        setMaxMessageLength(data.maxMessageLength || 1000);
-        setMaxNotificationLength(data.maxNotificationLength || 500);
-      }
+      const data = await messagesApi.getLimits();
+      setMaxMessageLength(data?.maxMessageLength || 1000);
+      setMaxNotificationLength(data?.maxNotificationLength || 500);
     } catch (err) {
       console.warn('فشل في جلب حدود الحروف');
     }
@@ -100,23 +88,15 @@ const Messages: React.FC = () => {
 
   const fetchUsers = useCallback(async () => {
     try {
-      // جلب المستخدمين من API الرسائل
-      const token = localStorage.getItem('token');
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-        'X-Account-Id': localStorage.getItem('accountId') || '1',
-        'X-User-Id': localStorage.getItem('userId') || '',
-      };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const response = await fetch(`${getBaseUrl()}/messages/all-users`, { headers });
-      if (response.ok) {
-        const data = await response.json();
-        setUsers(data || []);
-      } else {
-        console.warn('فشل في جلب المستخدمين');
-        setUsers([]);
+      const data = await messagesApi.getAllUsers();
+      if (Array.isArray(data) && data.length > 0) {
+        setUsers(data as UserItem[]);
+        return;
       }
+
+      // fallback في حال الحساب يرجع قائمة فرعية فقط
+      const fallback = await messagesApi.getUsers();
+      setUsers((fallback || []) as UserItem[]);
     } catch (err) {
       console.warn('فشل في جلب المستخدمين');
       setUsers([]);
@@ -125,23 +105,8 @@ const Messages: React.FC = () => {
 
   const fetchAccounts = useCallback(async () => {
     try {
-      // جلب الحسابات من API الرسائل
-      const token = localStorage.getItem('token');
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-        'X-Account-Id': localStorage.getItem('accountId') || '1',
-        'X-User-Id': localStorage.getItem('userId') || '',
-      };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const response = await fetch(`${getBaseUrl()}/messages/accounts`, { headers });
-      if (response.ok) {
-        const data = await response.json();
-        setAccounts(data || []);
-      } else {
-        console.warn('فشل في جلب الحسابات');
-        setAccounts([]);
-      }
+      const data = await messagesApi.getAccounts();
+      setAccounts((data || []) as AccountItem[]);
     } catch (err) {
       console.warn('فشل في جلب الحسابات');
       setAccounts([]);
@@ -201,6 +166,7 @@ const Messages: React.FC = () => {
       try {
         await messagesApi.markAsRead(message.id);
         setMessages(prev => prev.map(m => m.id === message.id ? { ...m, isRead: true } : m));
+        refreshUnreadBadge();
       } catch (err) {
         console.warn('فشل في تحديث حالة الرسالة');
       }
@@ -240,43 +206,26 @@ const Messages: React.FC = () => {
         });
         notify('تم إرسال الرسالة بنجاح', 'success');
       } else if (sendMode === 'all') {
-        let sentCount = 0;
-        for (const user of users) {
-          try {
-            await messagesApi.send({
-              recipientUserId: user.id,
-              subject,
-              content,
-              priority,
-            });
-            sentCount++;
-          } catch (err) {
-            console.warn(`فشل إرسال لـ ${user.fullName}`);
-          }
-        }
-        notify(`تم إرسال الرسالة إلى ${sentCount} مستخدم`, 'success');
+        await messagesApi.send({
+          subject,
+          content,
+          priority,
+        });
+        notify('تم إرسال الرسالة الجماعية بنجاح', 'success');
       } else if (sendMode === 'account' && selectedAccountId) {
-        const accountUsers = usersOfSelectedAccount;
-        let sentCount = 0;
-        for (const user of accountUsers) {
-          try {
-            await messagesApi.send({
-              recipientUserId: user.id,
-              subject,
-              content,
-              priority,
-            });
-            sentCount++;
-          } catch (err) {
-            console.warn(`فشل إرسال لـ ${user.fullName}`);
-          }
-        }
-        notify(`تم إرسال الرسالة إلى ${sentCount} مستخدم`, 'success');
+        await messagesApi.send({
+          subject,
+          content,
+          priority,
+        });
+        notify('تم إرسال الرسالة إلى الحساب المحدد بنجاح', 'success');
       }
 
       setShowCompose(false);
       resetComposeForm();
-      if (folder === 'sent') fetchMessages();
+      refreshNotifications();
+      refreshUnreadBadge();
+      fetchMessages();
     } catch (err: any) {
       notify(err.message || 'فشل في إرسال الرسالة', 'error');
     } finally {
@@ -302,6 +251,7 @@ const Messages: React.FC = () => {
       if (selectedMessage?.id === id) setSelectedMessage(null);
       notify('تم حذف الرسالة', 'success');
       setDeleteId(null);
+      refreshUnreadBadge();
     } catch (err: any) {
       notify(err.message || 'فشل في حذف الرسالة', 'error');
     } finally {
@@ -358,11 +308,11 @@ const Messages: React.FC = () => {
 
   const clearFilters = () => {
     setSearchQuery('');
-    setDateFrom(getDefaultDateFrom());
-    setDateTo(getDefaultDateTo());
+    setDateFrom('');
+    setDateTo('');
   };
 
-  const hasFilters = !!searchQuery;
+  const hasFilters = !!searchQuery || !!dateFrom || !!dateTo;
 
   if (loading && !selectedMessage) {
     return (
@@ -376,38 +326,60 @@ const Messages: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
-            <Mail className="text-indigo-600 dark:text-indigo-400" size={18} />
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-800 dark:to-slate-800/80 p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2.5 bg-white dark:bg-slate-700 rounded-xl shadow-sm border border-indigo-100 dark:border-slate-600">
+              <Mail className="text-indigo-600 dark:text-indigo-400" size={18} />
+            </div>
+            <div>
+              <h2 className="text-lg sm:text-xl font-bold text-slate-800 dark:text-white">الرسائل</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">صندوق الرسائل الداخلية</p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-slate-800 dark:text-white">الرسائل</h2>
-            {unreadCount > 0 && folder === 'inbox' && (
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {unreadCount} غير مقروءة
-              </p>
-            )}
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchMessages}
+              className="h-9 w-9 inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-500 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"
+              title="تحديث"
+            >
+              <RefreshCw size={16} />
+            </button>
+            <button
+              onClick={() => setShowCompose(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+            >
+              <Plus size={16} />
+              <span className="hidden sm:inline">إرسال رسالة</span>
+              <span className="sm:hidden">إرسال</span>
+            </button>
           </div>
         </div>
-        
-        <button
-          onClick={() => setShowCompose(true)}
-          className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
-        >
-          <Plus size={16} />
-          <span className="hidden sm:inline">رسالة جديدة</span>
-          <span className="sm:hidden">جديدة</span>
-        </button>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="rounded-lg border border-slate-200/80 dark:border-slate-600 bg-white/80 dark:bg-slate-700/70 px-2.5 py-2">
+            <p className="text-[10px] text-slate-500 dark:text-slate-400">المجلد</p>
+            <p className="text-sm font-bold text-slate-800 dark:text-white">{folder === 'inbox' ? 'الوارد' : 'المرسل'}</p>
+          </div>
+          <div className="rounded-lg border border-indigo-200/80 dark:border-indigo-700 bg-indigo-50/80 dark:bg-indigo-900/20 px-2.5 py-2">
+            <p className="text-[10px] text-indigo-600/80 dark:text-indigo-300/80">غير مقروء</p>
+            <p className="text-sm font-bold text-indigo-700 dark:text-indigo-300">{unreadCount}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200/80 dark:border-slate-600 bg-white/80 dark:bg-slate-700/70 px-2.5 py-2">
+            <p className="text-[10px] text-slate-500 dark:text-slate-400">الظاهر</p>
+            <p className="text-sm font-bold text-slate-800 dark:text-white">{filteredMessages.length}</p>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Sidebar - Messages List */}
         <div className="lg:col-span-1 space-y-3">
           {/* Folder Tabs */}
-          <div className="flex p-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
+          <div className="flex p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/70 dark:border-slate-700">
             <button
               onClick={() => { setFolder('inbox'); setSelectedMessage(null); }}
               className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
@@ -487,7 +459,7 @@ const Messages: React.FC = () => {
           </div>
 
           {/* Messages List - Grid for Mobile */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
             <div className="max-h-[500px] overflow-y-auto p-2">
               {filteredMessages.length === 0 ? (
                 <div className="p-6 text-center">
@@ -544,7 +516,7 @@ const Messages: React.FC = () => {
         {/* Message Content */}
         <div className="lg:col-span-2">
           {selectedMessage ? (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 h-full">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 h-full shadow-sm">
               {/* Message Header */}
               <div className="p-4 border-b border-slate-200 dark:border-slate-700">
                 <div className="flex items-start justify-between gap-4">
@@ -595,7 +567,7 @@ const Messages: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 h-full flex items-center justify-center p-12">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 h-full flex items-center justify-center p-12 shadow-sm">
               <div className="text-center">
                 <Mail className="mx-auto mb-4 text-slate-300 dark:text-slate-600" size={64} />
                 <h3 className="text-lg font-medium text-slate-600 dark:text-slate-400 mb-2">اختر رسالة للعرض</h3>
@@ -607,16 +579,15 @@ const Messages: React.FC = () => {
       </div>
 
       {/* Compose Modal */}
-      {showCompose && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-2xl p-6 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-slate-800 dark:text-white">رسالة جديدة</h3>
-              <button onClick={() => { setShowCompose(false); resetComposeForm(); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
-                <X size={20} />
-              </button>
-            </div>
-            
+      <AccessibleModal
+        isOpen={showCompose}
+        onClose={() => {
+          setShowCompose(false);
+          resetComposeForm();
+        }}
+        title="رسالة جديدة"
+        maxWidthClassName="max-w-2xl"
+      >
             <div className="space-y-4">
               {/* Send Mode Tabs */}
               <div>
@@ -891,14 +862,15 @@ const Messages: React.FC = () => {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+      </AccessibleModal>
 
       {/* Delete Confirmation Modal */}
-      {deleteId && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-md p-6 animate-in zoom-in-95 duration-200">
+      <AccessibleModal
+        isOpen={deleteId !== null}
+        onClose={() => setDeleteId(null)}
+        title="تأكيد الحذف"
+        maxWidthClassName="max-w-md"
+      >
             <div className="flex items-center gap-3 mb-4">
               <div className="p-3 bg-rose-100 dark:bg-rose-900/30 rounded-full">
                 <AlertTriangle className="text-rose-600 dark:text-rose-400" size={24} />
@@ -924,9 +896,7 @@ const Messages: React.FC = () => {
                 إلغاء
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </AccessibleModal>
     </div>
   );
 };

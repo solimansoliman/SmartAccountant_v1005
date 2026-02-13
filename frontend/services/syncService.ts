@@ -4,6 +4,8 @@
  * وتدعم العمل في وضع عدم الاتصال (Offline Mode)
  */
 
+import { getSystemConfigStorageKey } from './storageService';
+
 export interface SyncQueueItem {
   id: string;
   type: 'create' | 'update' | 'delete';
@@ -11,6 +13,10 @@ export interface SyncQueueItem {
   data: any;
   timestamp: number;
   retryCount: number;
+  maxRetries: number;
+  nextRetryAt?: number;
+  lastError?: string;
+  errorType?: 'network' | 'conflict' | 'server' | 'unknown';
   status: 'pending' | 'syncing' | 'failed' | 'synced';
 }
 
@@ -24,12 +30,18 @@ export interface SyncState {
 
 type SyncListener = (state: SyncState) => void;
 type DataChangeListener<T = any> = (entity: string, action: 'create' | 'update' | 'delete', data: T) => void;
+type SyncProcessor = (item: SyncQueueItem) => Promise<any>;
+
+interface QueueChangeOptions {
+  maxRetries?: number;
+}
 
 class SyncService {
   private static instance: SyncService;
   private syncQueue: SyncQueueItem[] = [];
   private listeners: Set<SyncListener> = new Set();
   private dataChangeListeners: Set<DataChangeListener> = new Set();
+  private processors: Map<string, SyncProcessor> = new Map();
   private state: SyncState = {
     isOnline: navigator.onLine,
     isSyncing: false,
@@ -39,7 +51,14 @@ class SyncService {
   };
   private syncInterval: NodeJS.Timeout | null = null;
   private readonly STORAGE_KEY = 'smartAccountant_syncQueue';
-  private readonly SYNC_INTERVAL = 30000; // 30 seconds
+  private readonly LEGACY_SYSTEM_CONFIG_KEY = 'app_system_config_global';
+  private readonly DEFAULT_SYNC_INTERVAL_MS = 30000;
+  private readonly DEFAULT_MAX_PENDING_CHANGES = 100;
+  private readonly DEFAULT_MAX_RETRIES = 5;
+  private readonly BASE_RETRY_DELAY_MS = 5000;
+  private readonly onOnline = () => this.handleOnlineStatusChange(true);
+  private readonly onOffline = () => this.handleOnlineStatusChange(false);
+  private readonly onAccountChanged = () => this.handleAccountChanged();
 
   private constructor() {
     this.init();
@@ -57,8 +76,9 @@ class SyncService {
     this.loadQueue();
 
     // Listen for online/offline events
-    window.addEventListener('online', () => this.handleOnlineStatusChange(true));
-    window.addEventListener('offline', () => this.handleOnlineStatusChange(false));
+    window.addEventListener('online', this.onOnline);
+    window.addEventListener('offline', this.onOffline);
+    window.addEventListener('accountChanged', this.onAccountChanged as EventListener);
 
     // Start periodic sync
     this.startPeriodicSync();
@@ -69,12 +89,106 @@ class SyncService {
     }
   }
 
+  private getOfflineSettings(): Record<string, any> {
+    try {
+      const scopedKey = getSystemConfigStorageKey();
+      const raw = localStorage.getItem(scopedKey) || localStorage.getItem(this.LEGACY_SYSTEM_CONFIG_KEY);
+      if (!raw) return {};
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+
+  private isOfflineEnabledBySettings(): boolean {
+    const settings = this.getOfflineSettings();
+    const allowedByPlan = settings.allowOfflineByPlan !== false;
+    const enabledByAdmin = settings.allowOfflineMode !== false;
+    return allowedByPlan && enabledByAdmin;
+  }
+
+  private isOfflineActionAllowed(action: 'create' | 'update' | 'delete'): boolean {
+    const settings = this.getOfflineSettings();
+    switch (action) {
+      case 'create':
+        return settings.allowOfflineCreate !== false;
+      case 'update':
+        return settings.allowOfflineEdit !== false;
+      case 'delete':
+        return settings.allowOfflineDelete === true;
+      default:
+        return false;
+    }
+  }
+
+  private getSyncIntervalMs(): number {
+    const settings = this.getOfflineSettings();
+    const syncIntervalSeconds = Number(settings.syncIntervalSeconds);
+    if (!Number.isFinite(syncIntervalSeconds) || syncIntervalSeconds <= 0) {
+      return this.DEFAULT_SYNC_INTERVAL_MS;
+    }
+    return Math.max(5, Math.floor(syncIntervalSeconds)) * 1000;
+  }
+
+  private getMaxPendingChanges(): number {
+    const settings = this.getOfflineSettings();
+    const maxPendingChanges = Number(settings.maxPendingChanges);
+    if (!Number.isFinite(maxPendingChanges) || maxPendingChanges <= 0) {
+      return this.DEFAULT_MAX_PENDING_CHANGES;
+    }
+    return Math.floor(maxPendingChanges);
+  }
+
+  private getAccountScopedStorageKey(): string {
+    try {
+      const userRaw = sessionStorage.getItem('smart_accountant_user') || localStorage.getItem('smart_accountant_user');
+      if (!userRaw) {
+        return `${this.STORAGE_KEY}_default`;
+      }
+
+      const user = JSON.parse(userRaw);
+      const accountId = user?.accountId;
+      if (!accountId) {
+        return `${this.STORAGE_KEY}_default`;
+      }
+
+      return `${this.STORAGE_KEY}_${accountId}`;
+    } catch {
+      return `${this.STORAGE_KEY}_default`;
+    }
+  }
+
+  private isConflictError(error: any): boolean {
+    const code = String(error?.code || '').toUpperCase();
+    const status = Number(error?.status);
+    const message = String(error?.message || '').toLowerCase();
+
+    if (code === 'CONFLICT' || code === 'STALE_DATA') return true;
+    if (status === 409 || status === 412) return true;
+    if (message.includes('conflict') || message.includes('تعارض') || message.includes('stale')) return true;
+    return false;
+  }
+
+  private getErrorType(error: any): SyncQueueItem['errorType'] {
+    if (this.isConflictError(error)) return 'conflict';
+
+    const status = Number(error?.status);
+    if (status >= 500) return 'server';
+    if (!Number.isFinite(status) || status === 0) return 'network';
+    return 'unknown';
+  }
+
+  private calculateRetryDelayMs(retryCount: number): number {
+    const exponential = this.BASE_RETRY_DELAY_MS * Math.pow(2, Math.max(0, retryCount - 1));
+    return Math.min(exponential, 10 * 60 * 1000); // max 10 minutes
+  }
+
   private loadQueue() {
     try {
-      const stored = localStorage.getItem(this.STORAGE_KEY);
+      const stored = localStorage.getItem(this.getAccountScopedStorageKey());
       if (stored) {
         this.syncQueue = JSON.parse(stored);
-        this.updateState({ pendingChanges: this.syncQueue.filter(i => i.status === 'pending').length });
+        this.updateState({ pendingChanges: this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed').length });
       }
     } catch (e) {
       console.error('Failed to load sync queue:', e);
@@ -83,7 +197,7 @@ class SyncService {
 
   private saveQueue() {
     try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.syncQueue));
+      localStorage.setItem(this.getAccountScopedStorageKey(), JSON.stringify(this.syncQueue));
     } catch (e) {
       console.error('Failed to save sync queue:', e);
     }
@@ -98,6 +212,15 @@ class SyncService {
     }
   }
 
+  private handleAccountChanged() {
+    this.syncQueue = [];
+    this.loadQueue();
+
+    if (this.state.isOnline && this.syncQueue.length > 0 && !this.state.isSyncing) {
+      this.processSyncQueue();
+    }
+  }
+
   private startPeriodicSync() {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
@@ -107,7 +230,7 @@ class SyncService {
       if (this.state.isOnline && this.syncQueue.length > 0 && !this.state.isSyncing) {
         this.processSyncQueue();
       }
-    }, this.SYNC_INTERVAL);
+    }, this.getSyncIntervalMs());
   }
 
   private updateState(partial: Partial<SyncState>) {
@@ -150,9 +273,146 @@ class SyncService {
   }
 
   /**
+   * Register processor for an entity
+   */
+  registerProcessor(entity: string, processor: SyncProcessor) {
+    this.processors.set(entity, processor);
+  }
+
+  /**
+   * Unregister processor for an entity
+   */
+  unregisterProcessor(entity: string) {
+    this.processors.delete(entity);
+  }
+
+  /**
+   * Get unsynced queue items (debug/helper)
+   */
+  getQueueItems(): SyncQueueItem[] {
+    return this.syncQueue
+      .filter(i => i.status === 'pending' || i.status === 'failed' || i.status === 'syncing')
+      .map(i => ({ ...i }));
+  }
+
+  /**
+   * Retry one queue item immediately
+   */
+  retryItem(itemId: string): boolean {
+    const item = this.syncQueue.find(i => i.id === itemId);
+    if (!item) return false;
+
+    item.status = 'pending';
+    item.nextRetryAt = undefined;
+    item.lastError = undefined;
+    item.errorType = undefined;
+
+    this.saveQueue();
+    this.updateState({
+      pendingChanges: this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed').length,
+    });
+
+    if (this.state.isOnline && !this.state.isSyncing) {
+      this.processSyncQueue();
+    }
+
+    return true;
+  }
+
+  /**
+   * Discard one queue item
+   */
+  discardItem(itemId: string): boolean {
+    const before = this.syncQueue.length;
+    this.syncQueue = this.syncQueue.filter(i => i.id !== itemId);
+    const removed = this.syncQueue.length !== before;
+
+    if (!removed) return false;
+
+    this.saveQueue();
+    this.updateState({
+      pendingChanges: this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed').length,
+    });
+    return true;
+  }
+
+  /**
+   * Retry all failed queue items
+   */
+  retryFailedItems(): number {
+    let updated = 0;
+    this.syncQueue.forEach(item => {
+      if (item.status === 'failed') {
+        item.status = 'pending';
+        item.nextRetryAt = undefined;
+        item.lastError = undefined;
+        item.errorType = undefined;
+        updated++;
+      }
+    });
+
+    if (updated > 0) {
+      this.saveQueue();
+      this.updateState({
+        pendingChanges: this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed').length,
+      });
+
+      if (this.state.isOnline && !this.state.isSyncing) {
+        this.processSyncQueue();
+      }
+    }
+
+    return updated;
+  }
+
+  /**
+   * Discard all conflict items
+   */
+  discardConflictItems(): number {
+    const before = this.syncQueue.length;
+    this.syncQueue = this.syncQueue.filter(i => i.errorType !== 'conflict');
+    const removed = before - this.syncQueue.length;
+
+    if (removed > 0) {
+      this.saveQueue();
+      this.updateState({
+        pendingChanges: this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed').length,
+      });
+    }
+
+    return removed;
+  }
+
+  /**
+   * Check online state
+   */
+  isOnline(): boolean {
+    return this.state.isOnline;
+  }
+
+  /**
    * Queue a change for syncing
    */
-  queueChange(entity: string, type: 'create' | 'update' | 'delete', data: any): string {
+  queueChange(entity: string, type: 'create' | 'update' | 'delete', data: any, options?: QueueChangeOptions): string {
+    const currentlyOnline = this.state.isOnline && navigator.onLine;
+    if (!currentlyOnline) {
+      if (!this.isOfflineEnabledBySettings()) {
+        throw new Error('وضع عدم الاتصال غير متاح حسب الباقة أو إعدادات الأدمن');
+      }
+
+      if (!this.isOfflineActionAllowed(type)) {
+        const actionName = type === 'create' ? 'الإنشاء' : type === 'update' ? 'التعديل' : 'الحذف';
+        throw new Error(`عملية ${actionName} غير مسموح بها أثناء العمل بدون اتصال`);
+      }
+    }
+
+    const unsyncedCount = this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed' || i.status === 'syncing').length;
+    const maxPendingChanges = this.getMaxPendingChanges();
+
+    if (unsyncedCount >= maxPendingChanges) {
+      throw new Error(`تم تجاوز الحد الأقصى للتغييرات المعلقة (${maxPendingChanges})`);
+    }
+
     const id = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     const item: SyncQueueItem = {
@@ -162,12 +422,13 @@ class SyncService {
       data,
       timestamp: Date.now(),
       retryCount: 0,
+      maxRetries: options?.maxRetries ?? this.DEFAULT_MAX_RETRIES,
       status: 'pending',
     };
 
     this.syncQueue.push(item);
     this.saveQueue();
-    this.updateState({ pendingChanges: this.syncQueue.filter(i => i.status === 'pending').length });
+    this.updateState({ pendingChanges: this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed').length });
 
     // Immediately notify data change listeners for optimistic updates
     this.notifyDataChange(entity, type, data);
@@ -195,7 +456,11 @@ class SyncService {
   async processSyncQueue(): Promise<void> {
     if (this.state.isSyncing || !this.state.isOnline) return;
 
-    const pendingItems = this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed');
+    const now = Date.now();
+    const pendingItems = this.syncQueue.filter(i =>
+      (i.status === 'pending' || i.status === 'failed') &&
+      (!i.nextRetryAt || i.nextRetryAt <= now)
+    );
     if (pendingItems.length === 0) return;
 
     this.updateState({ isSyncing: true, syncErrors: [] });
@@ -205,16 +470,37 @@ class SyncService {
     for (const item of pendingItems) {
       try {
         item.status = 'syncing';
+        item.lastError = undefined;
+        item.errorType = undefined;
         this.saveQueue();
 
-        // The actual API call should be handled by the component
-        // This is just for queue management
+        const processor = this.processors.get(item.entity);
+        if (!processor) {
+          throw new Error(`No sync processor registered for entity '${item.entity}'`);
+        }
+
+        const result = await processor(item);
+
         item.status = 'synced';
+        item.nextRetryAt = undefined;
+        this.notifyDataChange(item.entity, item.type, result);
         
       } catch (error: any) {
         item.status = 'failed';
         item.retryCount++;
-        errors.push(`Failed to sync ${item.entity}: ${error.message}`);
+        item.lastError = error?.message || 'Unknown sync error';
+        item.errorType = this.getErrorType(error);
+
+        const isConflict = this.isConflictError(error);
+        const maxRetries = item.maxRetries || this.DEFAULT_MAX_RETRIES;
+
+        if (!isConflict && item.retryCount < maxRetries) {
+          item.nextRetryAt = Date.now() + this.calculateRetryDelayMs(item.retryCount);
+        } else {
+          item.nextRetryAt = undefined;
+        }
+
+        errors.push(`Failed to sync ${item.entity}: ${item.lastError}`);
       }
     }
 
@@ -224,7 +510,7 @@ class SyncService {
 
     this.updateState({
       isSyncing: false,
-      pendingChanges: this.syncQueue.filter(i => i.status === 'pending').length,
+      pendingChanges: this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed').length,
       syncErrors: errors,
       lastSyncTime: Date.now(),
     });
@@ -253,14 +539,14 @@ class SyncService {
    * Get pending changes count
    */
   getPendingCount(): number {
-    return this.syncQueue.filter(i => i.status === 'pending').length;
+    return this.syncQueue.filter(i => i.status === 'pending' || i.status === 'failed').length;
   }
 
   /**
    * Check if there are pending changes for a specific entity
    */
   hasPendingChanges(entity: string): boolean {
-    return this.syncQueue.some(i => i.entity === entity && i.status === 'pending');
+    return this.syncQueue.some(i => i.entity === entity && (i.status === 'pending' || i.status === 'failed'));
   }
 
   /**
@@ -270,8 +556,9 @@ class SyncService {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
     }
-    window.removeEventListener('online', () => this.handleOnlineStatusChange(true));
-    window.removeEventListener('offline', () => this.handleOnlineStatusChange(false));
+    window.removeEventListener('online', this.onOnline);
+    window.removeEventListener('offline', this.onOffline);
+    window.removeEventListener('accountChanged', this.onAccountChanged as EventListener);
   }
 }
 

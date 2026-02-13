@@ -29,6 +29,12 @@ namespace SmartAccountant.API.Controllers
             return 1;
         }
 
+        // Helper method to get AccountId from JWT claims
+        private int GetAccountId()
+        {
+            return int.Parse(User.FindFirst("accountId")?.Value ?? "0");
+        }
+
         /// <summary>
         /// الحصول على جميع المستخدمين للحساب (أو جميع الحسابات للمدير العام)
         /// </summary>
@@ -121,8 +127,9 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<object>> GetUser(int id)
         {
+            var accountId = GetAccountId();
             var user = await _context.Users
-                .Where(u => u.Id == id)
+                .Where(u => u.Id == id && u.AccountId == accountId)
                 .Select(u => new
                 {
                     u.Id,
@@ -191,17 +198,65 @@ namespace SmartAccountant.API.Controllers
         [HttpPost]
         public async Task<ActionResult<object>> CreateUser([FromBody] CreateUserDto dto)
         {
+            var normalizedUsername = dto.Username?.Trim() ?? string.Empty;
+            var normalizedFullName = dto.FullName?.Trim() ?? string.Empty;
+            var normalizedEmail = dto.Email?.Trim();
+            var normalizedPhone = dto.Phone?.Trim();
+
+            if (string.IsNullOrWhiteSpace(normalizedUsername) || string.IsNullOrWhiteSpace(dto.Password) || string.IsNullOrWhiteSpace(normalizedFullName))
+                return BadRequest(new { message = "بيانات المستخدم الأساسية مطلوبة" });
+
+            if (!dto.IsSuperAdmin && dto.RoleIds?.Any() != true)
+            {
+                // إسناد دور افتراضي محدود الصلاحيات (NewAcount) مع دعم الحسابات القديمة (Staff/موظف).
+                var defaultLimitedRoleId = await _context.Roles
+                    .Where(r =>
+                        r.AccountId == dto.AccountId
+                        && r.IsActive
+                        && (r.Name == "NewAcount" || r.NameEn == "NewAcount" || r.Name == "موظف" || r.NameEn == "Staff"))
+                    .OrderBy(r => (r.Name == "NewAcount" || r.NameEn == "NewAcount") ? 0 : 1)
+                    .Select(r => r.Id)
+                    .FirstOrDefaultAsync();
+
+                if (defaultLimitedRoleId > 0)
+                {
+                    dto.RoleIds = new[] { defaultLimitedRoleId };
+                }
+                else
+                {
+                    return BadRequest(new { message = "يجب اختيار دور واحد على الأقل للمستخدم" });
+                }
+            }
+
+            var requestedRoleIds = (dto.RoleIds ?? Array.Empty<int>())
+                .Where(id => id > 0)
+                .Distinct()
+                .ToArray();
+
+            if (requestedRoleIds.Length > 0)
+            {
+                var validRoleIds = await _context.Roles
+                    .Where(r => r.AccountId == dto.AccountId && r.IsActive && requestedRoleIds.Contains(r.Id))
+                    .Select(r => r.Id)
+                    .ToListAsync();
+
+                if (validRoleIds.Count != requestedRoleIds.Length)
+                {
+                    return BadRequest(new { message = "أحد الأدوار المحددة غير صالح لهذا الحساب" });
+                }
+            }
+
             // التحقق من عدم وجود مستخدم بنفس الاسم
             var exists = await _context.Users.AnyAsync(u =>
-                u.AccountId == dto.AccountId && u.Username == dto.Username);
+                u.AccountId == dto.AccountId && u.Username == normalizedUsername);
 
             if (exists)
                 return BadRequest(new { message = "اسم المستخدم موجود مسبقاً" });
 
             // التحقق من البريد
-            if (!string.IsNullOrEmpty(dto.Email))
+            if (!string.IsNullOrEmpty(normalizedEmail))
             {
-                var emailExists = await _context.Users.AnyAsync(u => u.Email == dto.Email);
+                var emailExists = await _context.Users.AnyAsync(u => u.Email == normalizedEmail);
                 if (emailExists)
                     return BadRequest(new { message = "البريد الإلكتروني مستخدم مسبقاً" });
             }
@@ -209,25 +264,35 @@ namespace SmartAccountant.API.Controllers
             var user = new User
             {
                 AccountId = dto.AccountId,
-                Username = dto.Username,
+                Username = normalizedUsername,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
-                FullName = dto.FullName,
-                Email = dto.Email,
-                Phone = dto.Phone,
+                FullName = normalizedFullName,
+                Email = normalizedEmail,
+                Phone = normalizedPhone,
                 JobTitle = dto.JobTitle,
                 Department = dto.Department,
+                RoleType = dto.IsSuperAdmin ? UserRoleType.Admin : UserRoleType.User,
                 IsSuperAdmin = dto.IsSuperAdmin,
                 IsActive = true,
-                PreferredLanguage = dto.PreferredLanguage ?? "ar"
+                PreferredLanguage = dto.PreferredLanguage ?? "ar",
+
+                // الصلاحيات القديمة للتوافق: المستخدم الجديد يبدأ بصلاحيات مقيدة ويعتمد على الأدوار.
+                CanManageProducts = false,
+                CanManageCustomers = false,
+                CanCreateInvoices = false,
+                CanManageExpenses = false,
+                CanViewReports = false,
+                CanManageSettings = false,
+                CanManageUsers = false,
             };
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
             // إضافة الأدوار
-            if (dto.RoleIds?.Any() == true)
+            if (requestedRoleIds.Any())
             {
-                foreach (var roleId in dto.RoleIds)
+                foreach (var roleId in requestedRoleIds)
                 {
                     _context.UserRoles.Add(new UserRole
                     {

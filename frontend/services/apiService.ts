@@ -6,6 +6,7 @@
  */
 
 import { getApiUrl } from './configService';
+import syncService, { SyncQueueItem } from './syncService';
 
 // استخدام الرابط من الإعدادات المحفوظة أو القيمة الافتراضية
 export const getBaseUrl = () => getApiUrl();
@@ -100,6 +101,23 @@ export interface ApiProduct {
   updatedAt?: string;
 }
 
+export interface PhoneInfo {
+  id: number;
+  phoneNumber: string;
+  phoneType: string;
+  isPrimary: boolean;
+  isSecondary: boolean;
+  isActive: boolean;
+}
+
+export interface EmailInfo {
+  id: number;
+  emailAddress: string;
+  emailType: string;
+  isPrimary: boolean;
+  isActive: boolean;
+}
+
 export interface ApiCustomer {
   id?: number;
   code: string;
@@ -108,6 +126,14 @@ export interface ApiCustomer {
   type: 'Individual' | 'Company' | 'Government';
   phone?: string;
   email?: string;
+  primaryEmailId?: number;
+  primaryEmailAddress?: string;
+  countryId?: number;
+  countryName?: string;
+  provinceId?: number;
+  provinceName?: string;
+  cityId?: number;
+  cityName?: string;
   address?: string;
   city?: string;
   taxNumber?: string;
@@ -115,6 +141,13 @@ export interface ApiCustomer {
   balance: number;
   notes?: string;
   isActive: boolean;
+  isVIP?: boolean;
+  joinDate?: string;
+  invoiceCount?: number;
+  totalPurchases?: number;
+  totalPayments?: number;
+  phones?: PhoneInfo[];
+  emails?: EmailInfo[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -211,6 +244,50 @@ export interface ApiRevenue {
   createdAt?: string;
   updatedAt?: string;
 }
+
+const mapApiRevenue = (raw: any): ApiRevenue => {
+  const amount = Number(raw?.amount ?? raw?.Amount ?? 0) || 0;
+  const taxAmount = Number(raw?.taxAmount ?? raw?.TaxAmount ?? 0) || 0;
+  const totalAmount = Number(
+    raw?.totalAmount
+    ?? raw?.netAmount
+    ?? raw?.TotalAmount
+    ?? raw?.NetAmount
+    ?? (amount + taxAmount)
+  ) || (amount + taxAmount);
+
+  return {
+    id: raw?.id ?? raw?.Id,
+    revenueNumber: raw?.revenueNumber ?? raw?.RevenueNumber,
+    categoryId: raw?.categoryId ?? raw?.CategoryId,
+    customerId: raw?.customerId ?? raw?.CustomerId ?? raw?.payerId ?? raw?.PayerId,
+    revenueDate: raw?.revenueDate ?? raw?.RevenueDate ?? '',
+    description: raw?.description ?? raw?.Description ?? '',
+    amount,
+    taxAmount,
+    totalAmount,
+    paymentMethod: (raw?.paymentMethod ?? raw?.PaymentMethod ?? 'Cash') as ApiRevenue['paymentMethod'],
+    reference: raw?.reference ?? raw?.Reference ?? raw?.referenceNumber ?? raw?.ReferenceNumber,
+    status: raw?.status ?? raw?.Status,
+    notes: raw?.notes ?? raw?.Notes,
+    userId: raw?.userId ?? raw?.UserId ?? raw?.createdByUserId ?? raw?.CreatedByUserId,
+    createdAt: raw?.createdAt ?? raw?.CreatedAt,
+    updatedAt: raw?.updatedAt ?? raw?.UpdatedAt,
+  };
+};
+
+const mapApiRevenueList = (raw: any): ApiRevenue[] => {
+  if (Array.isArray(raw)) {
+    return raw.map(mapApiRevenue);
+  }
+
+  const wrappedList = raw?.items ?? raw?.data ?? raw?.value ?? raw?.Value;
+  if (Array.isArray(wrappedList)) {
+    return wrappedList.map(mapApiRevenue);
+  }
+
+  return [];
+};
 
 export interface ApiUnit {
   id?: number;
@@ -330,8 +407,27 @@ function handleTokenExpiry(): void {
   }
 }
 
+function extractIdentityFromToken(token: string): { accountId?: string; userId?: string } {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const accountId = payload?.AccountId ?? payload?.accountId;
+    const userId = payload?.['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier']
+      ?? payload?.nameid
+      ?? payload?.sub
+      ?? payload?.UserId
+      ?? payload?.userId;
+
+    return {
+      accountId: accountId != null ? String(accountId) : undefined,
+      userId: userId != null ? String(userId) : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 function getHeaders(): HeadersInit {
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
   
@@ -340,6 +436,7 @@ function getHeaders(): HeadersInit {
              || localStorage.getItem('smart_accountant_session');
   const userStr = sessionStorage.getItem('smart_accountant_user')
                || localStorage.getItem('smart_accountant_user');
+  let tokenIdentity: { accountId?: string; userId?: string } = {};
   
   if (token) {
     // ✅ التحقق من صلاحية Token قبل إرساله
@@ -348,20 +445,33 @@ function getHeaders(): HeadersInit {
       return headers;
     }
     headers['Authorization'] = `Bearer ${token}`;
+    tokenIdentity = extractIdentityFromToken(token);
   }
   
   if (userStr) {
     try {
       const user = JSON.parse(userStr);
-      if (user?.accountId) {
-        headers['X-Account-Id'] = user.accountId.toString();
+      const accountId = user?.accountId ?? user?.AccountId ?? user?.account?.id;
+      const userId = user?.id ?? user?.userId ?? user?.UserId ?? user?.uid;
+
+      if (accountId != null && accountId !== '') {
+        headers['X-Account-Id'] = accountId.toString();
       }
-      if (user?.id) {
-        headers['X-User-Id'] = user.id.toString();
+
+      if (userId != null && userId !== '') {
+        headers['X-User-Id'] = userId.toString();
       }
     } catch {
       // Ignore parse errors
     }
+  }
+
+  if (!headers['X-Account-Id'] && tokenIdentity.accountId) {
+    headers['X-Account-Id'] = tokenIdentity.accountId;
+  }
+
+  if (!headers['X-User-Id'] && tokenIdentity.userId) {
+    headers['X-User-Id'] = tokenIdentity.userId;
   }
   
   return headers;
@@ -450,13 +560,13 @@ export const customersApi = {
     return handleResponse<ApiCustomer>(response);
   },
 
-  update: async (id: number, customer: ApiCustomer): Promise<void> => {
+  update: async (id: number, customer: ApiCustomer): Promise<ApiCustomer> => {
     const response = await fetch(`${getBaseUrl()}/customers/${id}`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(customer),
     });
-    return handleResponse<void>(response);
+    return handleResponse<ApiCustomer>(response);
   },
 
   delete: async (id: number): Promise<void> => {
@@ -703,18 +813,20 @@ export const revenuesApi = {
     toDate?: string;
   }): Promise<ApiRevenue[]> => {
     const queryParams = new URLSearchParams();
-    if (params?.categoryId) queryParams.append('categoryId', params.categoryId.toString());
+    if (typeof params?.categoryId === 'number') queryParams.append('categoryId', params.categoryId.toString());
     if (params?.fromDate) queryParams.append('fromDate', params.fromDate);
     if (params?.toDate) queryParams.append('toDate', params.toDate);
     
     const url = `${getBaseUrl()}/revenues${queryParams.toString() ? '?' + queryParams : ''}`;
     const response = await fetch(url, { headers: getHeaders() });
-    return handleResponse<ApiRevenue[]>(response);
+    const raw = await handleResponse<any>(response);
+    return mapApiRevenueList(raw);
   },
 
   getById: async (id: number): Promise<ApiRevenue> => {
     const response = await fetch(`${getBaseUrl()}/revenues/${id}`, { headers: getHeaders() });
-    return handleResponse<ApiRevenue>(response);
+    const raw = await handleResponse<any>(response);
+    return mapApiRevenue(raw);
   },
 
   create: async (revenue: Omit<ApiRevenue, 'id' | 'revenueNumber' | 'createdAt'>): Promise<ApiRevenue> => {
@@ -723,7 +835,8 @@ export const revenuesApi = {
       headers: getHeaders(),
       body: JSON.stringify(revenue),
     });
-    return handleResponse<ApiRevenue>(response);
+    const raw = await handleResponse<any>(response);
+    return mapApiRevenue(raw);
   },
 
   update: async (id: number, revenue: ApiRevenue): Promise<void> => {
@@ -893,8 +1006,85 @@ export interface ApiPaymentDto {
   createdAt?: string;
 }
 
+const mapQueuedPaymentToDto = (item: SyncQueueItem): ApiPaymentDto => {
+  const payload = item.data?.payload || {};
+  const localId = item.data?.localId ?? Number(String(item.id).replace(/\D/g, '').slice(0, 9));
+  return {
+    id: Number.isFinite(localId) ? localId : undefined,
+    paymentNumber: payload.paymentNumber,
+    paymentType: payload.paymentType,
+    invoiceId: payload.invoiceId,
+    customerId: payload.customerId,
+    amount: Number(payload.amount || 0),
+    paymentDate: payload.paymentDate || new Date(item.timestamp).toISOString(),
+    paymentMethod: payload.paymentMethod,
+    referenceNumber: payload.referenceNumber,
+    bankName: payload.bankName,
+    checkNumber: payload.checkNumber,
+    checkDate: payload.checkDate,
+    description: payload.description,
+    status: payload.status || 'PendingSync',
+    notes: payload.notes,
+    createdAt: new Date(item.timestamp).toISOString(),
+  };
+};
+
+const getQueuedPayments = (params?: { customerId?: number; invoiceId?: number; fromDate?: string; toDate?: string }): ApiPaymentDto[] => {
+  const queued = syncService
+    .getQueueItems()
+    .filter(i => i.entity === 'payments' && i.type === 'create' && (i.status === 'pending' || i.status === 'failed'))
+    .map(mapQueuedPaymentToDto);
+
+  return queued.filter(p => {
+    if (params?.customerId && p.customerId !== params.customerId) return false;
+    if (params?.invoiceId && p.invoiceId !== params.invoiceId) return false;
+    if (params?.fromDate && p.paymentDate < params.fromDate) return false;
+    if (params?.toDate && p.paymentDate > params.toDate) return false;
+    return true;
+  });
+};
+
+const createPaymentOnline = async (payment: Partial<ApiPaymentDto>): Promise<ApiPaymentDto> => {
+  const response = await fetch(`${getBaseUrl()}/payments`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payment),
+  });
+  return handleResponse<ApiPaymentDto>(response);
+};
+
+let paymentsProcessorRegistered = false;
+const ensurePaymentsProcessorRegistered = () => {
+  if (paymentsProcessorRegistered) return;
+
+  syncService.registerProcessor('payments', async (item: SyncQueueItem) => {
+    if (item.type !== 'create') {
+      throw new Error(`Unsupported payments sync operation: ${item.type}`);
+    }
+
+    const created = await createPaymentOnline(item.data.payload);
+    return {
+      ...created,
+      __localId: item.data.localId,
+    };
+  });
+
+  paymentsProcessorRegistered = true;
+};
+
+ensurePaymentsProcessorRegistered();
+
 export const paymentsApi = {
   getAll: async (params?: { customerId?: number; invoiceId?: number; fromDate?: string; toDate?: string }): Promise<{ payments: ApiPaymentDto[]; totalCount: number; totalAmount: number }> => {
+    if (!syncService.isOnline() || !navigator.onLine) {
+      const queuedPayments = getQueuedPayments(params);
+      return {
+        payments: queuedPayments,
+        totalCount: queuedPayments.length,
+        totalAmount: queuedPayments.reduce((sum, p) => sum + (p.amount || 0), 0),
+      };
+    }
+
     const queryParams = new URLSearchParams();
     if (params?.customerId) queryParams.append('customerId', params.customerId.toString());
     if (params?.invoiceId) queryParams.append('invoiceId', params.invoiceId.toString());
@@ -902,8 +1092,17 @@ export const paymentsApi = {
     if (params?.toDate) queryParams.append('toDate', params.toDate);
     
     const url = `${getBaseUrl()}/payments${queryParams.toString() ? '?' + queryParams : ''}`;
-    const response = await fetch(url, { headers: getHeaders() });
-    return handleResponse<{ payments: ApiPaymentDto[]; totalCount: number; totalAmount: number }>(response);
+    try {
+      const response = await fetch(url, { headers: getHeaders() });
+      return handleResponse<{ payments: ApiPaymentDto[]; totalCount: number; totalAmount: number }>(response);
+    } catch {
+      const queuedPayments = getQueuedPayments(params);
+      return {
+        payments: queuedPayments,
+        totalCount: queuedPayments.length,
+        totalAmount: queuedPayments.reduce((sum, p) => sum + (p.amount || 0), 0),
+      };
+    }
   },
 
   getById: async (id: number): Promise<ApiPaymentDto> => {
@@ -912,12 +1111,18 @@ export const paymentsApi = {
   },
 
   create: async (payment: Partial<ApiPaymentDto>): Promise<ApiPaymentDto> => {
-    const response = await fetch(`${getBaseUrl()}/payments`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(payment),
-    });
-    return handleResponse<ApiPaymentDto>(response);
+    if (!navigator.onLine) {
+      throw new Error('لا يوجد اتصال بالإنترنت. لم يتم حفظ الدفعة في قاعدة البيانات.');
+    }
+
+    try {
+      return await createPaymentOnline(payment);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new Error('تعذر حفظ الدفعة في قاعدة البيانات. تحقق من الاتصال ثم أعد المحاولة.');
+    }
   },
 
   delete: async (id: number): Promise<void> => {
@@ -939,8 +1144,10 @@ export interface ApiNotification {
   id: number;
   title: string;
   message: string;
-  type: 'Info' | 'Success' | 'Warning' | 'Error' | 'Reminder' | 'Alert';
+  body?: string;
+  type: 'Info' | 'Success' | 'Warning' | 'Error' | 'Reminder' | 'Alert' | 'Invoice' | 'Payment' | 'Stock' | 'System';
   link?: string;
+  actionUrl?: string;
   icon?: string;
   isRead: boolean;
   readAt?: string;
@@ -957,7 +1164,12 @@ export const notificationsApi = {
     
     const url = `${getBaseUrl()}/notifications${queryParams.toString() ? '?' + queryParams : ''}`;
     const response = await fetch(url, { headers: getHeaders() });
-    return handleResponse<ApiNotification[]>(response);
+    const raw = await handleResponse<any[]>(response);
+    return (raw || []).map((item) => ({
+      ...item,
+      message: item?.message ?? item?.body ?? '',
+      link: item?.link ?? item?.actionUrl,
+    })) as ApiNotification[];
   },
 
   getUnreadCount: async (): Promise<number> => {
@@ -974,7 +1186,7 @@ export const notificationsApi = {
   },
 
   markAllAsRead: async (): Promise<void> => {
-    const response = await fetch(`${getBaseUrl()}/notifications/mark-all-read`, {
+    const response = await fetch(`${getBaseUrl()}/notifications/read-all`, {
       method: 'PUT',
       headers: getHeaders(),
     });
@@ -996,6 +1208,90 @@ export const notificationsApi = {
     });
     return handleResponse<void>(response);
   },
+
+  create: async (notification: {
+    userId: number;
+    title: string;
+    message: string;
+    type?: ApiNotification['type'];
+    link?: string;
+    icon?: string;
+  }): Promise<ApiNotification> => {
+    const typeMap: Record<ApiNotification['type'], number> = {
+      Info: 0,
+      Success: 1,
+      Warning: 2,
+      Error: 3,
+      Reminder: 4,
+      Alert: 5,
+      Invoice: 6,
+      Payment: 7,
+      Stock: 8,
+      System: 9,
+    };
+
+    const payload = {
+      userId: notification.userId,
+      title: notification.title,
+      message: notification.message,
+      type: typeMap[notification.type || 'Info'],
+      link: notification.link,
+      icon: notification.icon,
+    };
+
+    const response = await fetch(`${getBaseUrl()}/notifications`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    const raw = await handleResponse<any>(response);
+    return {
+      ...raw,
+      message: raw?.message ?? raw?.body ?? '',
+      link: raw?.link ?? raw?.actionUrl,
+    } as ApiNotification;
+  },
+
+  broadcast: async (notification: {
+    title: string;
+    message: string;
+    type?: ApiNotification['type'];
+    link?: string;
+    icon?: string;
+  }): Promise<{ sentTo: number }> => {
+    const typeMap: Record<ApiNotification['type'], number> = {
+      Info: 0,
+      Success: 1,
+      Warning: 2,
+      Error: 3,
+      Reminder: 4,
+      Alert: 5,
+      Invoice: 6,
+      Payment: 7,
+      Stock: 8,
+      System: 9,
+    };
+
+    const payload = {
+      title: notification.title,
+      message: notification.message,
+      type: typeMap[notification.type || 'Info'],
+      link: notification.link,
+      icon: notification.icon,
+    };
+
+    const response = await fetch(`${getBaseUrl()}/notifications/broadcast`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    const result = await handleResponse<any>(response);
+    return {
+      sentTo: Number(result?.sentTo ?? result?.SentTo ?? 0),
+    };
+  },
 };
 
 // ==================== Messages API ====================
@@ -1013,6 +1309,41 @@ export interface ApiMessage {
   createdAt: string;
 }
 
+export interface ApiMessageUser {
+  id: number;
+  fullName?: string;
+  username: string;
+  email?: string;
+  accountId?: number;
+  role?: string;
+  isActive?: boolean;
+}
+
+export interface ApiMessageAccount {
+  id: number;
+  name: string;
+  nameEn?: string;
+}
+
+export interface ApiMessageLimits {
+  maxMessageLength: number;
+  maxNotificationLength: number;
+}
+
+const mapApiMessage = (raw: any): ApiMessage => ({
+  id: raw?.id ?? raw?.Id,
+  senderUserId: raw?.senderUserId ?? raw?.senderId ?? raw?.SenderUserId ?? raw?.SenderId,
+  senderName: raw?.senderName ?? raw?.SenderName,
+  recipientUserId: raw?.recipientUserId ?? raw?.receiverId ?? raw?.recipientId ?? raw?.ReceiverId ?? raw?.RecipientUserId ?? 0,
+  recipientName: raw?.recipientName ?? raw?.receiverName ?? raw?.RecipientName ?? raw?.ReceiverName,
+  subject: raw?.subject ?? raw?.Subject ?? '',
+  content: raw?.content ?? raw?.Content ?? '',
+  isRead: Boolean(raw?.isRead ?? raw?.IsRead),
+  readAt: raw?.readAt ?? raw?.ReadAt,
+  priority: (raw?.priority ?? raw?.Priority ?? 'Normal') as ApiMessage['priority'],
+  createdAt: raw?.createdAt ?? raw?.CreatedAt ?? new Date().toISOString(),
+});
+
 export const messagesApi = {
   getAll: async (params?: { folder?: 'inbox' | 'sent'; unreadOnly?: boolean }): Promise<ApiMessage[]> => {
     const folder = params?.folder || 'inbox';
@@ -1020,29 +1351,36 @@ export const messagesApi = {
     
     const url = `${getBaseUrl()}${endpoint}`;
     const response = await fetch(url, { headers: getHeaders() });
-    return handleResponse<ApiMessage[]>(response);
+    const raw = await handleResponse<any[]>(response);
+    return (raw || []).map(mapApiMessage);
   },
 
   getById: async (id: number): Promise<ApiMessage> => {
     const response = await fetch(`${getBaseUrl()}/messages/${id}`, { headers: getHeaders() });
-    return handleResponse<ApiMessage>(response);
+    const raw = await handleResponse<any>(response);
+    return mapApiMessage(raw);
   },
 
-  send: async (message: { recipientUserId: number; subject: string; content: string; priority?: string }): Promise<ApiMessage> => {
+  send: async (message: { recipientUserId?: number; subject: string; content: string; priority?: string }): Promise<ApiMessage> => {
     // تحويل الأولوية من نص إلى رقم
     const priorityMap: Record<string, number> = { 'Low': 1, 'Normal': 2, 'High': 3, 'Urgent': 4 };
-    const payload = {
-      receiverId: message.recipientUserId,
+    const payload: any = {
       subject: message.subject,
       content: message.content,
       priority: priorityMap[message.priority || 'Normal'] || 2,
     };
+
+    if (typeof message.recipientUserId === 'number' && Number.isFinite(message.recipientUserId) && message.recipientUserId > 0) {
+      payload.receiverId = message.recipientUserId;
+    }
+
     const response = await fetch(`${getBaseUrl()}/messages`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(payload),
     });
-    return handleResponse<ApiMessage>(response);
+    const raw = await handleResponse<any>(response);
+    return mapApiMessage(raw);
   },
 
   markAsRead: async (id: number): Promise<void> => {
@@ -1064,6 +1402,26 @@ export const messagesApi = {
   getUnreadCount: async (): Promise<number> => {
     const response = await fetch(`${getBaseUrl()}/messages/unread-count`, { headers: getHeaders() });
     return handleResponse<number>(response);
+  },
+
+  getUsers: async (): Promise<ApiMessageUser[]> => {
+    const response = await fetch(`${getBaseUrl()}/messages/users`, { headers: getHeaders() });
+    return handleResponse<ApiMessageUser[]>(response);
+  },
+
+  getAllUsers: async (): Promise<ApiMessageUser[]> => {
+    const response = await fetch(`${getBaseUrl()}/messages/all-users`, { headers: getHeaders() });
+    return handleResponse<ApiMessageUser[]>(response);
+  },
+
+  getAccounts: async (): Promise<ApiMessageAccount[]> => {
+    const response = await fetch(`${getBaseUrl()}/messages/accounts`, { headers: getHeaders() });
+    return handleResponse<ApiMessageAccount[]>(response);
+  },
+
+  getLimits: async (): Promise<ApiMessageLimits> => {
+    const response = await fetch(`${getBaseUrl()}/messages/limits`, { headers: getHeaders() });
+    return handleResponse<ApiMessageLimits>(response);
   },
 };
 

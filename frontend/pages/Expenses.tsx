@@ -31,7 +31,59 @@ const codeToType: Record<string, TransactionType> = {
   'CREDIT_PURCHASE': TransactionType.PURCHASE,
   // إيرادات أخرى
   'OTHER_INCOME': TransactionType.OTHER_INCOME,
-  'OTHER_REV': TransactionType.OTHER_INCOME
+  'OTHER_REV': TransactionType.OTHER_INCOME,
+  // أسماء بديلة محتملة من الـ API
+  'EXPENSES': TransactionType.EXPENSE,
+  'PURCHASES': TransactionType.PURCHASE,
+  'REVENUE': TransactionType.OTHER_INCOME,
+  'OTHER_REVENUE': TransactionType.OTHER_INCOME,
+  // صيغ عربية
+  'مصروفات': TransactionType.EXPENSE,
+  'مشتريات': TransactionType.PURCHASE,
+  'إيرادات_أخرى': TransactionType.OTHER_INCOME,
+  'ايرادات_اخرى': TransactionType.OTHER_INCOME,
+};
+
+const normalizeTypeToken = (value: unknown): string => {
+  return String(value || '')
+    .trim()
+    .replace(/[\s-]+/g, '_')
+    .toUpperCase();
+};
+
+const normalizeHintText = (value: unknown): string => {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/[\s_-]+/g, ' ');
+};
+
+const hasOtherIncomeHint = (value: unknown): boolean => {
+  const text = normalizeHintText(value);
+  if (!text) return false;
+
+  const hints = [
+    'ايراد',
+    'دخل',
+    'ربح',
+    'مكسب',
+    'بيع اصل',
+    'بيع اصول',
+    'استرداد',
+    'عموله',
+    'revenue',
+    'income',
+    'profit',
+    'gain',
+    'asset sale',
+    'refund',
+    'commission',
+  ];
+
+  return hints.some(hint => text.includes(hint));
 };
 
 const typeToCode: Record<TransactionType, string> = {
@@ -39,6 +91,52 @@ const typeToCode: Record<TransactionType, string> = {
   [TransactionType.PURCHASE]: 'CASH_PURCHASE',
   [TransactionType.OTHER_INCOME]: 'OTHER_REV',
   [TransactionType.INCOME]: 'CASH_SALE'
+};
+
+const typeToFallbackTag: Record<TransactionType, string> = {
+  [TransactionType.EXPENSE]: '[EXPENSE]',
+  [TransactionType.PURCHASE]: '[PURCHASE]',
+  [TransactionType.OTHER_INCOME]: '[OTHER_INCOME]',
+  [TransactionType.INCOME]: '[INCOME]',
+};
+
+const normalizeArabicNumberInput = (value: string): number => {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/٫/g, '.')
+    .replace(/٬/g, '')
+    .replace(/,/g, '.');
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+};
+
+const getFriendlySaveError = (err: any): string => {
+  const status = Number(err?.status);
+  const serverMessage = String(err?.message || '').trim();
+
+  if (status === 400) {
+    return serverMessage || 'تعذر الحفظ: البيانات المدخلة غير صحيحة أو ناقصة.';
+  }
+
+  if (status === 401 || status === 403) {
+    return 'تعذر الحفظ: ليس لديك صلاحية تنفيذ هذه العملية. يرجى تسجيل الدخول مرة أخرى.';
+  }
+
+  if (status === 404) {
+    return 'تعذر الحفظ: الخدمة غير متاحة حاليًا. تحقق من إعداد رابط الخادم.';
+  }
+
+  if (status >= 500) {
+    return 'تعذر الحفظ: حدث خطأ داخلي في الخادم. حاول مرة أخرى بعد قليل.';
+  }
+
+  if (serverMessage) {
+    return `تعذر الحفظ: ${serverMessage}`;
+  }
+
+  return 'تعذر حفظ السجل. تحقق من الاتصال بالخادم ثم أعد المحاولة.';
 };
 
 type ViewMode = 'grid' | 'table';
@@ -53,7 +151,7 @@ const Expenses: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>(defaultViewMode || 'grid');
   
   // API Hooks
-  const { expenses, loading, addExpense: apiAddExpense, deleteExpense: apiDeleteExpense } = useExpenses();
+  const { expenses, loading, error, addExpense: apiAddExpense, deleteExpense: apiDeleteExpense } = useExpenses();
   const [transactionTypes, setTransactionTypes] = useState<ApiTransactionType[]>([]);
   const [typesLoading, setTypesLoading] = useState(true);
   
@@ -66,11 +164,9 @@ const Expenses: React.FC = () => {
   
   // Search and date filter
   const [searchQuery, setSearchQuery] = useState('');
-  // التاريخ الافتراضي: من سنة ماضية إلى اليوم
-  const today = new Date();
-  const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate()).toISOString().split('T')[0];
-  const [dateFrom, setDateFrom] = useState(oneYearAgo);
-  const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
+  // بدون فلترة تاريخ افتراضية حتى تظهر كل المعاملات عند فتح الصفحة
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   
   // Form
   const [amount, setAmount] = useState<string>('');
@@ -78,24 +174,45 @@ const Expenses: React.FC = () => {
   const [category, setCategory] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   
   // صلاحيات الصفحة
   const pagePerms = usePagePermission('expenses');
   
   // جلب أنواع المعاملات - يجب أن يكون قبل أي return
   useEffect(() => {
+    if (!user?.accountId) {
+      setTypesLoading(false);
+      return;
+    }
+
     const fetchTypes = async () => {
       try {
-        const types = await transactionTypesApi.getAll(1);
-        setTransactionTypes(types);
+        let types = await transactionTypesApi.getAll(user.accountId);
+        const requiredCodes = ['OP_EXPENSE', 'CASH_PURCHASE', 'OTHER_REV'];
+        const hasRequiredTypes = requiredCodes.every(code =>
+          (types || []).some(t => normalizeTypeToken(t.code) === code)
+        );
+
+        if (!types || types.length === 0 || !hasRequiredTypes) {
+          try {
+            await transactionTypesApi.seed(user.accountId, user.id);
+            types = await transactionTypesApi.getAll(user.accountId);
+          } catch {
+            // Ignore seed failure and continue with empty list fallback
+          }
+        }
+
+        setTransactionTypes(types || []);
       } catch (err) {
         console.error('Error fetching transaction types:', err);
+        setTransactionTypes([]);
       } finally {
         setTypesLoading(false);
       }
     };
     fetchTypes();
-  }, []);
+  }, [user?.accountId, user?.id]);
   
   // ==================== التحقق من الصلاحيات (بعد كل الـ hooks) ====================
   // إذا لم يكن لديه صلاحية عرض الصفحة
@@ -110,43 +227,112 @@ const Expenses: React.FC = () => {
 
   // تحديد نوع المعاملة من الـ API response
   const getTransactionTypeFromExpense = (expense: any): TransactionType => {
-    // أولاً: التحقق من transactionTypeCode من الـ API (بحرف كبير أو صغير)
-    const typeCode = expense.transactionTypeCode || expense.TransactionTypeCode;
-    if (typeCode && codeToType[typeCode]) {
-      return codeToType[typeCode];
+    const notesAndDescription = `${String(expense?.notes || '')} ${String(expense?.description || '')}`;
+    const notesNormalized = normalizeTypeToken(notesAndDescription);
+
+    // Prioritize explicit tags/hints to recover legacy rows saved with a default wrong code.
+    if (notesNormalized.includes('[PURCHASE]') || notesNormalized.includes('[مشتريات]')) {
+      return TransactionType.PURCHASE;
     }
-    // ثانياً: التحقق من transactionType.code (إذا كان الـ API يرسل الكائن كاملاً)
-    if (expense.transactionType?.code && codeToType[expense.transactionType.code]) {
-      return codeToType[expense.transactionType.code];
+    if (
+      notesNormalized.includes('[OTHER_INCOME]') ||
+      notesNormalized.includes('[إيرادات_أخرى]') ||
+      notesNormalized.includes('[ايرادات_اخرى]') ||
+      hasOtherIncomeHint(notesAndDescription)
+    ) {
+      return TransactionType.OTHER_INCOME;
     }
-    // ثالثاً: التحقق من notes (للتوافق مع البيانات القديمة)
-    const notes = expense.notes || expense.description || '';
-    if (notes.includes('[مشتريات]') || notes.includes('[PURCHASE]')) return TransactionType.PURCHASE;
-    if (notes.includes('[إيرادات أخرى]') || notes.includes('[OTHER_INCOME]')) return TransactionType.OTHER_INCOME;
+
+    const rawCandidates = [
+      expense.transactionTypeCode,
+      expense.TransactionTypeCode,
+      expense.transactionType?.code,
+      expense.transactionTypeName,
+      expense.TransactionTypeName,
+      expense.transactionType?.name,
+      expense.transactionType?.nameEn,
+      expense.type,
+      expense.transactionType,
+    ];
+
+    for (const candidate of rawCandidates) {
+      const normalized = normalizeTypeToken(candidate);
+      if (!normalized) continue;
+      if (codeToType[normalized]) {
+        return codeToType[normalized];
+      }
+      if (normalized.includes('PURCHASE')) return TransactionType.PURCHASE;
+      if (normalized.includes('REV') || normalized.includes('INCOME')) return TransactionType.OTHER_INCOME;
+      if (normalized.includes('EXPENSE')) return TransactionType.EXPENSE;
+    }
+
+    // ثالثاً: استخدام transactionTypeId مع القاموس المحمّل من السيرفر
+    const transactionTypeId = Number(expense.transactionTypeId ?? expense.TransactionTypeId);
+    if (Number.isFinite(transactionTypeId) && transactionTypeId > 0) {
+      const matchedType = transactionTypes.find(t => t.id === transactionTypeId);
+      if (matchedType) {
+        const normalized = normalizeTypeToken(matchedType.code || matchedType.name || matchedType.nameEn);
+        if (codeToType[normalized]) {
+          return codeToType[normalized];
+        }
+      }
+    }
+
+    // تلميحات نصية إضافية للبيانات القديمة غير الموسومة
+    if (hasOtherIncomeHint(notesAndDescription)) {
+      return TransactionType.OTHER_INCOME;
+    }
+
     return TransactionType.EXPENSE;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || !description) {
-        notify('يرجى ملء الحقول المطلوبة (المبلغ والبيان)', 'warning');
+    setSubmitError(null);
+
+    if (!amount || !description || !date) {
+        const message = 'يرجى ملء الحقول المطلوبة (المبلغ والبيان)';
+        setSubmitError(message);
+        notify(message, 'warning');
         return;
+    }
+
+    const parsedAmount = normalizeArabicNumberInput(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      const message = 'قيمة المبلغ غير صحيحة. يرجى إدخال رقم صالح أكبر من صفر.';
+      setSubmitError(message);
+      notify(message, 'warning');
+      return;
     }
     
     // الحصول على TransactionTypeId
     const transactionTypeCode = typeToCode[activeTab];
-    const transactionTypeId = getTypeIdByCode(transactionTypeCode);
+    let transactionTypeId = getTypeIdByCode(transactionTypeCode);
+
+    if (!transactionTypeId && user?.accountId) {
+      try {
+        await transactionTypesApi.seed(user.accountId, user.id);
+        const refreshedTypes = await transactionTypesApi.getAll(user.accountId);
+        setTransactionTypes(refreshedTypes || []);
+        transactionTypeId = (refreshedTypes || []).find(t => t.code === transactionTypeCode)?.id;
+      } catch {
+        // Keep fallback behavior with notes tag and transactionTypeCode.
+      }
+    }
+
+    const typeTag = typeToFallbackTag[activeTab] || '[EXPENSE]';
+    const mergedNotes = `${typeTag} ${(category || description || 'عام').trim()}`.trim();
     
     setSubmitting(true);
     try {
       await apiAddExpense({
         expenseDate: date,
         description: description,
-        amount: parseFloat(amount),
+        amount: parsedAmount,
         taxAmount: 0,
-        totalAmount: parseFloat(amount),
+        totalAmount: parsedAmount,
         paymentMethod: 'Cash',
-        notes: category || 'عام',
+        notes: mergedNotes,
         transactionTypeId: transactionTypeId,
         transactionTypeCode: transactionTypeCode
       } as any);
@@ -154,9 +340,12 @@ const Expenses: React.FC = () => {
       setAmount('');
       setDescription('');
       setCategory('');
+      setSubmitError(null);
       notify(`تم تسجيل ${activeTab} بنجاح`, 'success');
     } catch (err: any) {
-      notify(err.message || 'حدث خطأ أثناء الحفظ', 'error');
+      const message = getFriendlySaveError(err);
+      setSubmitError(message);
+      notify(message, 'error');
     } finally {
       setSubmitting(false);
     }
@@ -164,69 +353,88 @@ const Expenses: React.FC = () => {
 
   // تحويل وفلترة المصروفات حسب النوع
   const allItems = useMemo(() => {
-    console.log('=== DEBUG: Raw expenses from API ===');
-    expenses.forEach((e, i) => {
-      console.log(`Expense ${i}:`, {
-        id: e.id,
-        transactionTypeCode: (e as any).transactionTypeCode,
-        TransactionTypeCode: (e as any).TransactionTypeCode,
-        transactionType: (e as any).transactionType,
-        description: e.description
-      });
-    });
-    
     return expenses.map(e => {
       const transactionType = getTransactionTypeFromExpense(e);
       const notes = e.notes || (e as any).category || 'عام';
       // إزالة علامة النوع من العرض (للبيانات القديمة)
       const cleanCategory = notes.replace(/\[(مصروفات|مشتريات|إيرادات أخرى|EXPENSE|PURCHASE|OTHER_INCOME)\]\s*/g, '').trim() || 'عام';
-      
-      console.log(`Mapped expense ${e.id}: typeCode=${(e as any).transactionTypeCode}, mappedType=${transactionType}`);
+      const normalizedAmount = Number(e.totalAmount ?? e.amount ?? 0) || 0;
       
       return {
         id: e.id,
         expenseNumber: e.expenseNumber || `#${e.id}`,
-        date: e.expenseDate || (e as any).date || '',
+        date: e.expenseDate || (e as any).date || (e as any).expenseDateTime || e.createdAt || '',
         description: e.description || '',
         category: cleanCategory,
-        amount: e.totalAmount ?? e.amount ?? 0,
+        amount: normalizedAmount,
         paymentMethod: e.paymentMethod || 'Cash',
         status: e.status || 'Paid',
         transactionType: transactionType
       };
     });
-  }, [expenses]);
+  }, [expenses, transactionTypes]);
 
   // فلترة القائمة حسب التبويب المختار والبحث والتاريخ
+  const normalizeAddressSearchText = (value: string) => {
+    return (value || '')
+      .toLowerCase()
+      .replace(/[•|،,\-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const toDateKey = (value: string | undefined | null): string | null => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+
+    const ymd = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (ymd) return `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
+
+    const dmy = raw.match(/(\d{2})-(\d{2})-(\d{4})/);
+    if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+
+    const parsed = new Date(raw);
+    if (isNaN(parsed.getTime())) return null;
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const filteredList = useMemo(() => {
-    console.log('=== DEBUG Filter ===');
-    console.log('filterTab:', filterTab, 'type:', typeof filterTab);
-    console.log('TransactionType.EXPENSE:', TransactionType.EXPENSE);
-    console.log('TransactionType.PURCHASE:', TransactionType.PURCHASE);
-    console.log('TransactionType.OTHER_INCOME:', TransactionType.OTHER_INCOME);
-    console.log('allItems types:', allItems.map(i => ({ id: i.id, type: i.transactionType })));
-    
     let result = filterTab === 'ALL' ? allItems : allItems.filter(item => item.transactionType === filterTab);
     
     // فلتر البحث
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      result = result.filter(item => 
-        item.description.toLowerCase().includes(query) ||
-        item.category.toLowerCase().includes(query) ||
-        item.expenseNumber.toLowerCase().includes(query)
-      );
+      const rawQuery = searchQuery.toLowerCase().trim();
+      const normalizedQuery = normalizeAddressSearchText(searchQuery);
+
+      result = result.filter(item => {
+        const descriptionText = (item.description || '').toLowerCase();
+        const categoryText = (item.category || '').toLowerCase();
+        const numberText = (item.expenseNumber || '').toLowerCase();
+
+        const rawCombinedText = `${descriptionText} ${categoryText} ${numberText}`.trim();
+        const normalizedCombinedText = normalizeAddressSearchText(rawCombinedText);
+
+        return rawCombinedText.includes(rawQuery) ||
+          (normalizedQuery.length > 0 && normalizedCombinedText.includes(normalizedQuery));
+      });
     }
     
     // فلتر التاريخ
-    if (dateFrom) {
-      result = result.filter(item => item.date >= dateFrom);
+    const fromDateKey = toDateKey(dateFrom);
+    const toDateKeyValue = toDateKey(dateTo);
+    if (fromDateKey || toDateKeyValue) {
+      result = result.filter(item => {
+        const itemDateKey = toDateKey(item.date);
+        if (!itemDateKey) return false;
+        if (fromDateKey && itemDateKey < fromDateKey) return false;
+        if (toDateKeyValue && itemDateKey > toDateKeyValue) return false;
+        return true;
+      });
     }
-    if (dateTo) {
-      result = result.filter(item => item.date <= dateTo);
-    }
-    
-    console.log('Filtered count:', result.length);
+
     return result;
   }, [allItems, filterTab, searchQuery, dateFrom, dateTo]);
   
@@ -275,6 +483,11 @@ const Expenses: React.FC = () => {
     setDateFrom('');
     setDateTo('');
     setFilterTab('ALL');
+  };
+
+  const clearDateRange = () => {
+    setDateFrom('');
+    setDateTo('');
   };
 
   // إحصائيات لكل نوع
@@ -357,7 +570,13 @@ const Expenses: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 print-no-backgrounds">
+      {error && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200 print:hidden">
+          تعذر تحميل بعض بيانات المعاملات: {error}
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-800 dark:text-white">مصروفات ومشتريات وإيرادات أخرى</h2>
         {/* View Mode Toggle */}
@@ -451,6 +670,12 @@ const Expenses: React.FC = () => {
                  onChange={setDate}
                />
             </div>
+
+            {submitError && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-200">
+                {submitError}
+              </div>
+            )}
 
             <button 
               type="submit" 
@@ -552,6 +777,15 @@ const Expenses: React.FC = () => {
                    className="px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:border-primary w-32"
                    placeholder="يوم-شهر-سنة"
                  />
+                 <button
+                   type="button"
+                   onClick={clearDateRange}
+                   disabled={!dateFrom && !dateTo}
+                   className="px-3 py-1.5 text-xs font-medium border border-slate-200 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                   title="إظهار كل التواريخ"
+                 >
+                   كل التواريخ
+                 </button>
                </div>
                
                {/* أزرار الأدوات */}
@@ -592,8 +826,8 @@ const Expenses: React.FC = () => {
            </div>
 
            {/* الجدول */}
-           <div className="bg-white dark:bg-slate-800/90 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 overflow-hidden backdrop-blur-sm">
-             <div className="p-3 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700/50 flex items-center justify-between">
+           <div className="bg-white dark:bg-slate-800/90 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/50 overflow-hidden backdrop-blur-sm print:bg-white print:shadow-none print:border-slate-300">
+             <div className="p-3 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700/50 flex items-center justify-between print:bg-white print:border-slate-300">
                <div className="flex items-center gap-2">
                  {getFilterIcon()}
                  <span className="font-medium text-slate-700 dark:text-slate-200">
@@ -607,8 +841,8 @@ const Expenses: React.FC = () => {
              {/* Table View */}
              {viewMode === 'table' && (
                <div className="overflow-x-auto">
-                 <table className="w-full text-right text-sm">
-                   <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400">
+                 <table className="w-full text-right text-sm print:bg-white">
+                   <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 print:bg-white print:text-black">
                      <tr>
                        <th className="p-3 whitespace-nowrap">#</th>
                        <th className="p-3 whitespace-nowrap">النوع</th>
@@ -627,7 +861,7 @@ const Expenses: React.FC = () => {
                          <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-700">
                            <td className="p-3 text-slate-400 text-xs">{item.expenseNumber}</td>
                            <td className="p-3">
-                             <span className={`px-2 py-1 rounded text-xs whitespace-nowrap ${typeBadge.color}`}>{typeBadge.label}</span>
+                             <span className={`px-2 py-1 rounded text-xs whitespace-nowrap ${typeBadge.color} print:bg-transparent print:text-black print:border print:border-slate-300`}>{typeBadge.label}</span>
                            </td>
                            <td className="p-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                              <div className="flex items-center gap-2">
@@ -637,10 +871,10 @@ const Expenses: React.FC = () => {
                            </td>
                            <td className="p-3 font-medium text-slate-800 dark:text-slate-200 max-w-xs truncate" title={item.description}>{item.description || '-'}</td>
                            <td className="p-3">
-                             <span className="bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded text-xs text-slate-600 dark:text-slate-300">{item.category || 'عام'}</span>
+                             <span className="bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded text-xs text-slate-600 dark:text-slate-300 print:bg-transparent print:text-black print:border print:border-slate-300">{item.category || 'عام'}</span>
                            </td>
                            <td className="p-3">
-                             <span className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-2 py-1 rounded text-xs">{getPaymentMethodLabel(item.paymentMethod)}</span>
+                             <span className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-2 py-1 rounded text-xs print:bg-transparent print:text-black print:border print:border-slate-300">{getPaymentMethodLabel(item.paymentMethod)}</span>
                            </td>
                            <td className={`p-3 font-bold whitespace-nowrap ${getTabColor(item.transactionType)}`}>
                              {(item.amount || 0).toLocaleString('ar-SA')} {currency}

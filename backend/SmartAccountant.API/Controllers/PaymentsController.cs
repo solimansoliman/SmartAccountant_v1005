@@ -26,6 +26,22 @@ namespace SmartAccountant.API.Controllers
             return 1;
         }
 
+        private static void RecalculateInvoiceStatus(Invoice invoice)
+        {
+            if (invoice.PaidAmount >= invoice.TotalAmount && invoice.TotalAmount > 0)
+            {
+                invoice.Status = InvoiceStatus.Paid;
+            }
+            else if (invoice.PaidAmount > 0)
+            {
+                invoice.Status = InvoiceStatus.PartialPaid;
+            }
+            else if (invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.Cancelled)
+            {
+                invoice.Status = InvoiceStatus.Confirmed;
+            }
+        }
+
         /// <summary>
         /// الحصول على جميع المدفوعات
         /// </summary>
@@ -147,6 +163,53 @@ namespace SmartAccountant.API.Controllers
         {
             var accountId = GetAccountId();
 
+            if (dto.Amount <= 0)
+            {
+                return BadRequest(new { message = "قيمة الدفعة يجب أن تكون أكبر من صفر" });
+            }
+
+            Invoice? invoice = null;
+            if (dto.InvoiceId.HasValue)
+            {
+                invoice = await _context.Invoices
+                    .FirstOrDefaultAsync(i => i.Id == dto.InvoiceId.Value && i.AccountId == accountId);
+
+                if (invoice == null)
+                {
+                    return BadRequest(new { message = "الفاتورة غير موجودة ضمن الحساب الحالي" });
+                }
+
+                if (invoice.Status == InvoiceStatus.Cancelled)
+                {
+                    return BadRequest(new { message = "لا يمكن تسجيل دفعة على فاتورة ملغاة" });
+                }
+
+                if (invoice.PaidAmount + dto.Amount > invoice.TotalAmount)
+                {
+                    return BadRequest(new { message = "قيمة الدفعة تتجاوز المبلغ المتبقي في الفاتورة" });
+                }
+            }
+
+            if (dto.CustomerId.HasValue)
+            {
+                var customerExists = await _context.Customers
+                    .AnyAsync(c => c.Id == dto.CustomerId.Value && c.AccountId == accountId && c.IsActive);
+                if (!customerExists)
+                {
+                    return BadRequest(new { message = "العميل غير موجود ضمن الحساب الحالي" });
+                }
+            }
+
+            if (invoice?.CustomerId.HasValue == true)
+            {
+                if (dto.CustomerId.HasValue && dto.CustomerId.Value != invoice.CustomerId.Value)
+                {
+                    return BadRequest(new { message = "العميل لا يطابق عميل الفاتورة" });
+                }
+
+                dto.CustomerId = invoice.CustomerId;
+            }
+
             // توليد رقم المدفوعة
             var lastPayment = await _context.Payments
                 .Where(p => p.AccountId == accountId)
@@ -178,21 +241,10 @@ namespace SmartAccountant.API.Controllers
             _context.Payments.Add(payment);
 
             // تحديث المبلغ المدفوع في الفاتورة
-            if (dto.InvoiceId.HasValue)
+            if (invoice != null)
             {
-                var invoice = await _context.Invoices.FindAsync(dto.InvoiceId.Value);
-                if (invoice != null && invoice.AccountId == accountId)
-                {
-                    invoice.PaidAmount += dto.Amount;
-                    if (invoice.PaidAmount >= invoice.TotalAmount)
-                    {
-                        invoice.Status = InvoiceStatus.Paid;
-                    }
-                    else if (invoice.PaidAmount > 0)
-                    {
-                        invoice.Status = InvoiceStatus.PartialPaid;
-                    }
-                }
+                invoice.PaidAmount += dto.Amount;
+                RecalculateInvoiceStatus(invoice);
             }
 
             await _context.SaveChangesAsync();
@@ -227,6 +279,8 @@ namespace SmartAccountant.API.Controllers
                 return NotFound();
             }
 
+            var oldAmount = payment.Amount;
+
             // تحديث المدفوعة
             if (dto.PaymentType != null) payment.PaymentType = dto.PaymentType;
             if (dto.Amount.HasValue) payment.Amount = dto.Amount.Value;
@@ -240,6 +294,39 @@ namespace SmartAccountant.API.Controllers
             if (dto.Status != null) payment.Status = dto.Status;
             if (dto.Notes != null) payment.Notes = dto.Notes;
             payment.UpdatedAt = DateTime.UtcNow;
+
+            if (dto.Amount.HasValue && dto.Amount.Value <= 0)
+            {
+                return BadRequest(new { message = "قيمة الدفعة يجب أن تكون أكبر من صفر" });
+            }
+
+            if (payment.InvoiceId.HasValue)
+            {
+                var invoice = await _context.Invoices
+                    .FirstOrDefaultAsync(i => i.Id == payment.InvoiceId.Value && i.AccountId == accountId);
+
+                if (invoice == null)
+                {
+                    return BadRequest(new { message = "الفاتورة المرتبطة بهذه الدفعة غير موجودة ضمن الحساب الحالي" });
+                }
+
+                var amountDiff = payment.Amount - oldAmount;
+                if (amountDiff != 0)
+                {
+                    if (invoice.PaidAmount + amountDiff > invoice.TotalAmount)
+                    {
+                        return BadRequest(new { message = "قيمة الدفعة بعد التعديل تتجاوز المبلغ المتبقي في الفاتورة" });
+                    }
+
+                    invoice.PaidAmount += amountDiff;
+                    if (invoice.PaidAmount < 0)
+                    {
+                        invoice.PaidAmount = 0;
+                    }
+
+                    RecalculateInvoiceStatus(invoice);
+                }
+            }
 
             await _context.SaveChangesAsync();
 
@@ -264,19 +351,17 @@ namespace SmartAccountant.API.Controllers
             // إعادة المبلغ من الفاتورة إذا كانت مرتبطة
             if (payment.InvoiceId.HasValue)
             {
-                var invoice = await _context.Invoices.FindAsync(payment.InvoiceId.Value);
+                var invoice = await _context.Invoices
+                    .FirstOrDefaultAsync(i => i.Id == payment.InvoiceId.Value && i.AccountId == accountId);
                 if (invoice != null)
                 {
                     invoice.PaidAmount -= payment.Amount;
                     if (invoice.PaidAmount <= 0)
                     {
-                        invoice.Status = InvoiceStatus.Draft;
                         invoice.PaidAmount = 0;
                     }
-                    else if (invoice.PaidAmount < invoice.TotalAmount)
-                    {
-                        invoice.Status = InvoiceStatus.PartialPaid;
-                    }
+
+                    RecalculateInvoiceStatus(invoice);
                 }
             }
 

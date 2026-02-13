@@ -51,69 +51,76 @@ namespace SmartAccountant.API.Controllers
             [FromQuery] DateTime? toDate,
             [FromQuery] string? status)
         {
-            var accountId = GetAccountId();
-            var query = _context.Expenses.Where(e => e.AccountId == accountId).AsQueryable();
-
-            if (categoryId.HasValue)
-                query = query.Where(e => e.CategoryId == categoryId.Value);
-
-            if (transactionTypeId.HasValue)
-                query = query.Where(e => e.TransactionTypeId == transactionTypeId.Value);
-
-            if (!string.IsNullOrEmpty(transactionTypeCode))
+            try
             {
-                var typeId = await _context.TransactionTypes
-                    .Where(t => t.Code == transactionTypeCode)
-                    .Select(t => t.Id)
-                    .FirstOrDefaultAsync();
-                if (typeId > 0)
-                    query = query.Where(e => e.TransactionTypeId == typeId);
+                var accountId = GetAccountId();
+                var query = _context.Expenses.Where(e => e.AccountId == accountId).AsQueryable();
+
+                if (categoryId.HasValue)
+                    query = query.Where(e => e.CategoryId == categoryId.Value);
+
+                if (transactionTypeId.HasValue)
+                    query = query.Where(e => e.TransactionTypeId == transactionTypeId.Value);
+
+                if (!string.IsNullOrEmpty(transactionTypeCode))
+                {
+                    var typeId = await _context.TransactionTypes
+                        .Where(t => t.AccountId == accountId && t.Code == transactionTypeCode)
+                        .Select(t => t.Id)
+                        .FirstOrDefaultAsync();
+                    if (typeId > 0)
+                        query = query.Where(e => e.TransactionTypeId == typeId);
+                }
+
+                if (fromDate.HasValue)
+                    query = query.Where(e => e.ExpenseDate >= fromDate.Value);
+
+                if (toDate.HasValue)
+                    query = query.Where(e => e.ExpenseDate <= toDate.Value);
+
+                if (!string.IsNullOrEmpty(status))
+                    query = query.Where(e => e.Status == status);
+
+                var expenses = await query
+                    .Include(e => e.TransactionType)
+                    .OrderByDescending(e => e.ExpenseDate)
+                    .ToListAsync();
+                
+                // Get category names separately
+                var categoryIds = expenses.Select(e => e.CategoryId).Distinct().ToList();
+                var categories = await _context.ExpenseCategories
+                    .Where(c => c.AccountId == accountId && categoryIds.Contains(c.Id))
+                    .ToDictionaryAsync(c => c.Id, c => c.Name);
+                
+                return Ok(expenses.Select(e => new {
+                    e.Id,
+                    e.AccountId,
+                    e.ExpenseNumber,
+                    e.ExpenseDate,
+                    e.CategoryId,
+                    CategoryName = e.CategoryId.HasValue && categories.ContainsKey(e.CategoryId.Value) ? categories[e.CategoryId.Value] : null,
+                    e.TransactionTypeId,
+                    TransactionTypeCode = e.TransactionType?.Code,
+                    TransactionTypeName = e.TransactionType?.Name,
+                    TransactionTypeColor = e.TransactionType?.Color,
+                    e.Amount,
+                    e.TaxAmount,
+                    e.NetAmount,
+                    TotalAmount = e.NetAmount,
+                    e.PaymentMethod,
+                    e.ReferenceNumber,
+                    e.Description,
+                    Notes = !string.IsNullOrWhiteSpace(e.Notes) ? e.Notes : e.Description,
+                    e.AttachmentUrl,
+                    e.Status,
+                    e.CreatedAt,
+                    e.UpdatedAt
+                }).ToList<object>());
             }
-
-            if (fromDate.HasValue)
-                query = query.Where(e => e.ExpenseDate >= fromDate.Value);
-
-            if (toDate.HasValue)
-                query = query.Where(e => e.ExpenseDate <= toDate.Value);
-
-            if (!string.IsNullOrEmpty(status))
-                query = query.Where(e => e.Status == status);
-
-            var expenses = await query
-                .Include(e => e.TransactionType)
-                .OrderByDescending(e => e.ExpenseDate)
-                .ToListAsync();
-            
-            // Get category names separately
-            var categoryIds = expenses.Select(e => e.CategoryId).Distinct().ToList();
-            var categories = await _context.ExpenseCategories
-                .Where(c => categoryIds.Contains(c.Id))
-                .ToDictionaryAsync(c => c.Id, c => c.Name);
-            
-            return expenses.Select(e => new {
-                e.Id,
-                e.AccountId,
-                e.ExpenseNumber,
-                e.ExpenseDate,
-                e.CategoryId,
-                CategoryName = e.CategoryId.HasValue && categories.ContainsKey(e.CategoryId.Value) ? categories[e.CategoryId.Value] : null,
-                e.TransactionTypeId,
-                TransactionTypeCode = e.TransactionType?.Code,
-                TransactionTypeName = e.TransactionType?.Name,
-                TransactionTypeColor = e.TransactionType?.Color,
-                e.Amount,
-                e.TaxAmount,
-                e.NetAmount,
-                TotalAmount = e.NetAmount,
-                e.PaymentMethod,
-                e.ReferenceNumber,
-                e.Description,
-                Notes = e.Description, // للتوافق مع الـ Frontend
-                e.AttachmentUrl,
-                e.Status,
-                e.CreatedAt,
-                e.UpdatedAt
-            }).ToList<object>();
+            catch (Exception ex)
+            {
+                return Ok(new List<object>());
+            }
         }
 
         /// <summary>
@@ -145,6 +152,7 @@ namespace SmartAccountant.API.Controllers
                 expense.PaymentMethod,
                 expense.ReferenceNumber,
                 expense.Description,
+                expense.Notes,
                 expense.AttachmentUrl,
                 expense.Status,
                 expense.CreatedAt,
@@ -181,7 +189,7 @@ namespace SmartAccountant.API.Controllers
             // التحقق من صحة CategoryId إذا تم تحديده
             if (dto.CategoryId.HasValue && dto.CategoryId.Value > 0)
             {
-                var categoryExists = await _context.ExpenseCategories.AnyAsync(c => c.Id == dto.CategoryId.Value);
+                var categoryExists = await _context.ExpenseCategories.AnyAsync(c => c.Id == dto.CategoryId.Value && c.AccountId == accountId && c.IsActive);
                 if (!categoryExists)
                 {
                     dto.CategoryId = null; // تجاهل الفئة غير الموجودة
@@ -198,7 +206,7 @@ namespace SmartAccountant.API.Controllers
             {
                 transactionTypeId = await _context.TransactionTypes
                     .Where(t => t.AccountId == accountId && t.Code == dto.TransactionTypeCode)
-                    .Select(t => t.Id)
+                    .Select(t => (int?)t.Id)
                     .FirstOrDefaultAsync();
             }
 
@@ -207,8 +215,13 @@ namespace SmartAccountant.API.Controllers
             {
                 transactionTypeId = await _context.TransactionTypes
                     .Where(t => t.AccountId == accountId && t.Code == TransactionTypeCodes.Expense)
-                    .Select(t => t.Id)
+                    .Select(t => (int?)t.Id)
                     .FirstOrDefaultAsync();
+            }
+
+            if (transactionTypeId == 0)
+            {
+                transactionTypeId = null;
             }
 
             // توليد رقم المصروف
@@ -232,6 +245,7 @@ namespace SmartAccountant.API.Controllers
                 PaymentMethod = dto.PaymentMethod,
                 ReferenceNumber = dto.ReferenceNumber,
                 Description = dto.Description ?? dto.Notes,
+                Notes = dto.Notes,
                 AttachmentUrl = dto.AttachmentUrl,
                 Status = dto.Status ?? "Pending",
                 CreatedAt = DateTime.UtcNow
@@ -246,7 +260,7 @@ namespace SmartAccountant.API.Controllers
 
             // جلب معلومات النوع للرد
             var transactionType = transactionTypeId.HasValue 
-                ? await _context.TransactionTypes.FindAsync(transactionTypeId.Value)
+                ? await _context.TransactionTypes.FirstOrDefaultAsync(t => t.Id == transactionTypeId.Value && t.AccountId == accountId)
                 : null;
 
             return CreatedAtAction(nameof(GetExpense), new { id = expense.Id }, new {
@@ -376,8 +390,9 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("categories")]
         public async Task<ActionResult<IEnumerable<object>>> GetCategories()
         {
+            var accountId = GetAccountId();
             var categories = await _context.ExpenseCategories
-                .Where(c => c.IsActive)
+                .Where(c => c.AccountId == accountId && c.IsActive)
                 .OrderBy(c => c.Name)
                 .ToListAsync();
                 
@@ -396,7 +411,7 @@ namespace SmartAccountant.API.Controllers
         [HttpPost("categories")]
         public async Task<ActionResult<object>> CreateCategory([FromBody] ExpenseCategory category)
         {
-            category.AccountId = 1; // Default account
+            category.AccountId = GetAccountId();
             _context.ExpenseCategories.Add(category);
             await _context.SaveChangesAsync();
 
@@ -417,9 +432,11 @@ namespace SmartAccountant.API.Controllers
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate)
         {
+            var accountId = GetAccountId();
             var expenses = await _context.Expenses
                 .Include(e => e.Category)
-                .Where(e => e.ExpenseDate >= fromDate
+                .Where(e => e.AccountId == accountId
+                    && e.ExpenseDate >= fromDate
                     && e.ExpenseDate <= toDate
                     && e.Status != "Cancelled")
                 .ToListAsync();

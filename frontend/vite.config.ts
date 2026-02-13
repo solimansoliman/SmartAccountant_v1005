@@ -6,8 +6,8 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-        port: 3000,
-        host: '0.0.0.0',
+        port: 3003,
+        host: 'localhost',
         proxy: {
           '/api': {
             target: 'http://localhost:5000',
@@ -24,6 +24,18 @@ export default defineConfig(({ mode }) => {
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+        }
+      },
+      build: {
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+              'maps-vendor': ['leaflet', 'react-leaflet'],
+              'icons-vendor': ['lucide-react'],
+              'qrcode-vendor': ['qrcode.react']
+            }
+          }
         }
       }
     };

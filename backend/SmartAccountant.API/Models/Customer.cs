@@ -13,8 +13,6 @@ namespace SmartAccountant.API.Models
         
         public string Code { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
-        public string? NameEn { get; set; }
-        public string? ContactPerson { get; set; }
         
         // FK للهواتف والإيميلات
         public int? PrimaryPhoneId { get; set; }
@@ -26,25 +24,23 @@ namespace SmartAccountant.API.Models
         public int? PrimaryEmailId { get; set; }
         public Email? PrimaryEmail { get; set; }
         
+        // البيانات الجغرافية
+        public int? CountryId { get; set; }
+        public Country? Country { get; set; }
+        
+        public int? ProvinceId { get; set; }
+        public Province? Province { get; set; }
+        
+        public int? CityId { get; set; }
+        public City? City { get; set; }
+        
+        // العنوان - نص يتم إنشاؤه من البيانات الجغرافية
         public string? Address { get; set; }
-        public string? Address2 { get; set; }
-        public string? City { get; set; }
-        public string? State { get; set; }
-        public string? Country { get; set; }
-        public string? PostalCode { get; set; }
-        public string? Website { get; set; }
-        public string? TaxNumber { get; set; }
-        public string? CommercialRegister { get; set; }
+        
         public CustomerType Type { get; set; } = CustomerType.Individual;
-        public string? CustomerGroup { get; set; }
-        public string? PaymentTerms { get; set; }
         public decimal Balance { get; set; }
-        public decimal CreditLimit { get; set; }
-        public decimal DiscountPercent { get; set; }
         public int? PriceListId { get; set; }
         public int? CurrencyId { get; set; }
-        public int? Rating { get; set; }
-        public DateTime? BirthDate { get; set; }
         public DateTime? JoinDate { get; set; }
         public DateTime? LastPurchaseDate { get; set; }
         public DateTime? LastPaymentDate { get; set; }
@@ -52,7 +48,6 @@ namespace SmartAccountant.API.Models
         public decimal? TotalPayments { get; set; } = 0;
         public int InvoiceCount { get; set; } = 0;
         public string? Notes { get; set; }
-        public string? InternalNotes { get; set; }
         public bool IsActive { get; set; } = true;
         public bool IsVIP { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -67,6 +62,8 @@ namespace SmartAccountant.API.Models
 
         // Navigation Properties
         public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();
+        public ICollection<CustomerPhone> Phones { get; set; } = new List<CustomerPhone>();
+        public ICollection<CustomerEmail> Emails { get; set; } = new List<CustomerEmail>();
     }
 
     public enum CustomerType

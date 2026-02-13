@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using SmartAccountant.API.Data;
 using SmartAccountant.API.Models;
 using SmartAccountant.API.Services;
+using System.Net.Mail;
+using System.Text.RegularExpressions;
 
 namespace SmartAccountant.API.Controllers
 {
@@ -12,11 +14,13 @@ namespace SmartAccountant.API.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IActivityLogService _activityLog;
+        private readonly ILogger<AccountsController> _logger;
 
-        public AccountsController(ApplicationDbContext context, IActivityLogService activityLog)
+        public AccountsController(ApplicationDbContext context, IActivityLogService activityLog, ILogger<AccountsController> logger)
         {
             _context = context;
             _activityLog = activityLog;
+            _logger = logger;
         }
 
         private int GetUserId()
@@ -106,22 +110,67 @@ namespace SmartAccountant.API.Controllers
         {
             try
             {
+                var accountName = dto.Name?.Trim() ?? string.Empty;
+                var accountNameEn = dto.NameEn?.Trim();
+                var email = dto.Email?.Trim();
+                var phone = dto.Phone?.Trim();
+                var address = dto.Address?.Trim();
+                var currencySymbol = dto.CurrencySymbol?.Trim() ?? "ج.م";
+                var taxNumber = dto.TaxNumber?.Trim();
+                var adminUsername = dto.AdminUsername?.Trim() ?? string.Empty;
+                var adminPassword = dto.AdminPassword ?? string.Empty;
+                var adminFullName = string.IsNullOrWhiteSpace(dto.AdminFullName) ? accountName : dto.AdminFullName.Trim();
+
                 // التحقق من البيانات المطلوبة
-                if (string.IsNullOrWhiteSpace(dto.Name))
+                if (string.IsNullOrWhiteSpace(accountName))
                     return BadRequest(new { message = "اسم الحساب مطلوب" });
-                if (string.IsNullOrWhiteSpace(dto.AdminUsername))
+                if (accountName.Length < 2 || accountName.Length > 120)
+                    return BadRequest(new { message = "اسم الحساب يجب أن يكون بين حرفين و120 حرفاً" });
+
+                if (string.IsNullOrWhiteSpace(adminUsername))
                     return BadRequest(new { message = "اسم المستخدم المسؤول مطلوب" });
-                if (string.IsNullOrWhiteSpace(dto.AdminPassword))
+                if (!Regex.IsMatch(adminUsername, "^[a-zA-Z0-9._-]{3,50}$"))
+                    return BadRequest(new { message = "اسم المستخدم غير صالح" });
+
+                if (string.IsNullOrWhiteSpace(adminPassword))
                     return BadRequest(new { message = "كلمة مرور المسؤول مطلوبة" });
+                if (adminPassword.Length < 6)
+                    return BadRequest(new { message = "كلمة مرور المسؤول يجب ألا تقل عن 6 أحرف" });
+
+                if (!string.IsNullOrWhiteSpace(email))
+                {
+                    try
+                    {
+                        _ = new MailAddress(email);
+                    }
+                    catch
+                    {
+                        return BadRequest(new { message = "البريد الإلكتروني غير صالح" });
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(phone) && !Regex.IsMatch(phone, "^[0-9+()\\-\\s]{7,20}$"))
+                    return BadRequest(new { message = "رقم الهاتف غير صالح" });
+
+                if (currencySymbol.Length > 10)
+                    return BadRequest(new { message = "رمز العملة طويل جداً" });
+
+                if (!string.IsNullOrWhiteSpace(taxNumber) && taxNumber.Length > 50)
+                    return BadRequest(new { message = "الرقم الضريبي طويل جداً" });
+
+                var existingAccount = await _context.Accounts
+                    .AnyAsync(a => a.Name.ToLower() == accountName.ToLower());
+                if (existingAccount)
+                    return BadRequest(new { message = "اسم الحساب موجود مسبقاً" });
 
                 // التحقق من عدم تكرار اسم المستخدم
-                var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Username == dto.AdminUsername);
+                var existingUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.Username.ToLower() == adminUsername.ToLower());
                 if (existingUser != null)
                     return BadRequest(new { message = "اسم المستخدم موجود مسبقاً" });
 
                 // جلب العملة الافتراضية إذا لم تُحدد
                 var currencyId = dto.CurrencyId;
-                var currencySymbol = dto.CurrencySymbol ?? "ج.م";
                 if (!currencyId.HasValue || currencyId.Value == 0)
                 {
                     var defaultCurrency = await _context.Currencies.FirstOrDefaultAsync();
@@ -138,14 +187,14 @@ namespace SmartAccountant.API.Controllers
 
                 var account = new Account
                 {
-                    Name = dto.Name,
-                    NameEn = dto.NameEn,
-                    Email = dto.Email,
-                    Phone = dto.Phone,
-                    Address = dto.Address,
+                    Name = accountName,
+                    NameEn = accountNameEn,
+                    Email = email,
+                    Phone = phone,
+                    Address = address,
                     CurrencyId = currencyId.Value,
                     CurrencySymbol = currencySymbol,
-                    TaxNumber = dto.TaxNumber,
+                    TaxNumber = taxNumber,
                     Plan = AccountPlan.Trial,
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow,
@@ -160,10 +209,10 @@ namespace SmartAccountant.API.Controllers
                 var owner = new User
                 {
                     AccountId = account.Id,
-                    Username = dto.AdminUsername,
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.AdminPassword),
-                    FullName = dto.AdminFullName ?? dto.Name,
-                    Email = dto.Email,
+                    Username = adminUsername,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword),
+                    FullName = adminFullName,
+                    Email = email,
                     RoleType = UserRoleType.Owner,
                     IsSuperAdmin = true,
                     IsActive = true,
@@ -321,17 +370,56 @@ namespace SmartAccountant.API.Controllers
         {
             try
             {
-                // إنشاء وحدات القياس الأساسية
-                var units = new List<Unit>
+                // إنشاء أدوار أساسية (Lookup) لكل حساب جديد
+                var defaultRoles = new List<Role>
                 {
-                    new Unit { AccountId = accountId, Name = "قطعة", NameEn = "Piece", Symbol = "PCS", IsBase = true, CreatedByUserId = userId },
-                    new Unit { AccountId = accountId, Name = "كيلوجرام", NameEn = "Kilogram", Symbol = "KG", IsBase = true, CreatedByUserId = userId },
-                    new Unit { AccountId = accountId, Name = "لتر", NameEn = "Liter", Symbol = "L", IsBase = true, CreatedByUserId = userId },
-                    new Unit { AccountId = accountId, Name = "متر", NameEn = "Meter", Symbol = "M", IsBase = true, CreatedByUserId = userId },
-                    new Unit { AccountId = accountId, Name = "كرتون", NameEn = "Carton", Symbol = "CTN", IsBase = false, CreatedByUserId = userId }
+                    new Role { AccountId = accountId, Name = "مسؤول", NameEn = "Administrator", Description = "إدارة كاملة للحساب", IsSystemRole = true, Color = "#dc2626", Icon = "shield", IsActive = true, CreatedAt = DateTime.UtcNow },
+                    new Role { AccountId = accountId, Name = "مدير", NameEn = "Manager", Description = "إدارة العمليات اليومية", IsSystemRole = true, Color = "#2563eb", Icon = "briefcase", IsActive = true, CreatedAt = DateTime.UtcNow },
+                    new Role { AccountId = accountId, Name = "محاسب", NameEn = "Accountant", Description = "إدارة القيود والفواتير والتقارير", IsSystemRole = true, Color = "#16a34a", Icon = "calculator", IsActive = true, CreatedAt = DateTime.UtcNow },
+                    new Role { AccountId = accountId, Name = "أمين مخزون", NameEn = "Inventory Keeper", Description = "إدارة المخزون والمنتجات", IsSystemRole = true, Color = "#ca8a04", Icon = "boxes", IsActive = true, CreatedAt = DateTime.UtcNow },
+                    new Role { AccountId = accountId, Name = "موظف مبيعات", NameEn = "Sales", Description = "إنشاء الفواتير وخدمة العملاء", IsSystemRole = true, Color = "#9333ea", Icon = "shopping-cart", IsActive = true, CreatedAt = DateTime.UtcNow },
+                    new Role { AccountId = accountId, Name = "NewAcount", NameEn = "NewAcount", Description = "دور افتراضي بصلاحيات محدودة", IsSystemRole = true, Color = "#0f766e", Icon = "user", IsActive = true, CreatedAt = DateTime.UtcNow },
+                    new Role { AccountId = accountId, Name = "عارض", NameEn = "Viewer", Description = "عرض فقط", IsSystemRole = true, Color = "#475569", Icon = "eye", IsActive = true, CreatedAt = DateTime.UtcNow }
                 };
-                _context.Units.AddRange(units);
-                await _context.SaveChangesAsync();
+
+                var existingRoleNames = await _context.Roles
+                    .Where(r => r.AccountId == accountId)
+                    .Select(r => r.Name)
+                    .ToListAsync();
+
+                var rolesToAdd = defaultRoles
+                    .Where(r => !existingRoleNames.Contains(r.Name))
+                    .ToList();
+
+                if (rolesToAdd.Any())
+                {
+                    _context.Roles.AddRange(rolesToAdd);
+                    await _context.SaveChangesAsync();
+                }
+
+                // ربط مالك الحساب بدور "مسؤول" تلقائياً
+                var adminRole = await _context.Roles
+                    .Where(r => r.AccountId == accountId && r.Name == "مسؤول")
+                    .FirstOrDefaultAsync();
+
+                if (adminRole != null)
+                {
+                    var hasOwnerRole = await _context.UserRoles.AnyAsync(ur => ur.UserId == userId && ur.RoleId == adminRole.Id);
+                    if (!hasOwnerRole)
+                    {
+                        _context.UserRoles.Add(new UserRole
+                        {
+                            UserId = userId,
+                            RoleId = adminRole.Id,
+                            AssignedAt = DateTime.UtcNow,
+                            AssignedByUserId = userId
+                        });
+                        await _context.SaveChangesAsync();
+                    }
+                }
+
+                // إنشاء/تأكيد الوحدات الافتراضية الخاصة بالحساب
+                await DefaultUnitsSeeder.EnsureForAccountAsync(_context, accountId, userId);
 
                 // إنشاء تصنيفات المنتجات
                 var productCategories = new List<ProductCategory>
@@ -369,7 +457,6 @@ namespace SmartAccountant.API.Controllers
                     AccountId = accountId,
                     Code = "C001",
                     Name = "عميل نقدي",
-                    NameEn = "Cash Customer",
                     Type = CustomerType.Individual,
                     CreatedByUserId = userId
                 };
@@ -392,77 +479,117 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("{id}/usage")]
         public async Task<ActionResult<AccountUsageDto>> GetAccountUsage(int id)
         {
-            var account = await _context.Accounts
-                .Include(a => a.PlanDetails)
-                .FirstOrDefaultAsync(a => a.Id == id);
-
-            if (account == null)
-                return NotFound(new { message = "الحساب غير موجود" });
-
-            var now = DateTime.UtcNow;
-            var startOfMonth = new DateTime(now.Year, now.Month, 1);
-            var endOfMonth = startOfMonth.AddMonths(1);
-
-            // حساب الاستخدام الحالي
-            var currentUsers = await _context.Users.CountAsync(u => u.AccountId == id && u.IsActive);
-            var currentMonthInvoices = await _context.Invoices.CountAsync(i => i.AccountId == id && i.InvoiceDate >= startOfMonth && i.InvoiceDate < endOfMonth);
-            var currentCustomers = await _context.Customers.CountAsync(c => c.AccountId == id);
-            var currentProducts = await _context.Products.CountAsync(p => p.AccountId == id);
-
-            // جلب معلومات الاشتراك
-            var subscription = await _context.Set<Subscription>()
-                .Where(s => s.AccountId == id && s.Status == "active")
-                .OrderByDescending(s => s.EndDate)
-                .FirstOrDefaultAsync();
-
-            var plan = account.PlanDetails;
-
-            return new AccountUsageDto
+            try
             {
-                AccountId = account.Id,
-                AccountName = account.Name,
-                PlanId = account.PlanId,
-                PlanName = plan?.Name ?? "مجاني",
-                PlanNameEn = plan?.NameEn ?? "Free",
-                
-                // الاستخدام الحالي
-                CurrentUsers = currentUsers,
-                CurrentMonthInvoices = currentMonthInvoices,
-                CurrentCustomers = currentCustomers,
-                CurrentProducts = currentProducts,
-                
-                // حدود الخطة
-                MaxUsers = plan?.MaxUsers ?? 1,
-                MaxInvoices = plan?.MaxInvoices ?? 50,
-                MaxCustomers = plan?.MaxCustomers ?? 25,
-                MaxProducts = plan?.MaxProducts ?? 50,
-                
-                // النسب المئوية (لعرض شريط التقدم)
-                UsersPercentage = plan?.MaxUsers > 0 ? (double)currentUsers / plan.MaxUsers * 100 : 0,
-                InvoicesPercentage = plan?.MaxInvoices > 0 ? (double)currentMonthInvoices / plan.MaxInvoices * 100 : 0,
-                CustomersPercentage = plan?.MaxCustomers > 0 ? (double)currentCustomers / plan.MaxCustomers * 100 : 0,
-                ProductsPercentage = plan?.MaxProducts > 0 ? (double)currentProducts / plan.MaxProducts * 100 : 0,
-                
-                // ميزات الخطة
-                HasBasicReports = plan?.HasBasicReports ?? true,
-                HasAdvancedReports = plan?.HasAdvancedReports ?? false,
-                HasEmailSupport = plan?.HasEmailSupport ?? true,
-                HasPrioritySupport = plan?.HasPrioritySupport ?? false,
-                HasDedicatedManager = plan?.HasDedicatedManager ?? false,
-                HasBackup = plan?.HasBackup ?? false,
-                BackupFrequency = plan?.BackupFrequency,
-                HasCustomInvoices = plan?.HasCustomInvoices ?? false,
-                HasMultiCurrency = plan?.HasMultiCurrency ?? false,
-                HasApiAccess = plan?.HasApiAccess ?? false,
-                HasWhiteLabel = plan?.HasWhiteLabel ?? false,
-                
-                // معلومات الاشتراك
-                SubscriptionStart = subscription?.StartDate,
-                SubscriptionEnd = subscription?.EndDate,
-                SubscriptionStatus = subscription?.Status ?? "none",
-                AutoRenew = subscription?.AutoRenew ?? false,
-                DaysRemaining = subscription != null ? Math.Max(0, (subscription.EndDate - DateTime.UtcNow).Days) : 0
-            };
+                var account = await _context.Accounts
+                    .Include(a => a.PlanDetails)
+                    .FirstOrDefaultAsync(a => a.Id == id);
+
+                if (account == null)
+                    return NotFound(new { message = "الحساب غير موجود" });
+
+                var now = DateTime.UtcNow;
+                var startOfMonth = new DateTime(now.Year, now.Month, 1);
+                var endOfMonth = startOfMonth.AddMonths(1);
+
+                // حساب الاستخدام الحالي
+                var currentUsers = await _context.Users.CountAsync(u => u.AccountId == id && u.IsActive);
+                var currentMonthInvoices = await _context.Invoices.CountAsync(i => i.AccountId == id && i.InvoiceDate >= startOfMonth && i.InvoiceDate < endOfMonth);
+                var currentCustomers = await _context.Customers.CountAsync(c => c.AccountId == id);
+                var currentProducts = await _context.Products.CountAsync(p => p.AccountId == id);
+
+                // جلب معلومات الاشتراك (بدون استخدام Set<Subscription> لتجنب الأخطاء)
+                var plan = account.PlanDetails;
+
+                return Ok(new AccountUsageDto
+                {
+                    AccountId = account.Id,
+                    AccountName = account.Name,
+                    PlanId = account.PlanId,
+                    PlanName = plan?.Name ?? "مجاني",
+                    PlanNameEn = plan?.NameEn ?? "Free",
+                    
+                    // الاستخدام الحالي
+                    CurrentUsers = currentUsers,
+                    CurrentMonthInvoices = currentMonthInvoices,
+                    CurrentCustomers = currentCustomers,
+                    CurrentProducts = currentProducts,
+                    
+                    // حدود الخطة
+                    MaxUsers = plan?.MaxUsers ?? 1,
+                    MaxInvoices = plan?.MaxInvoices ?? 50,
+                    MaxCustomers = plan?.MaxCustomers ?? 25,
+                    MaxProducts = plan?.MaxProducts ?? 50,
+                    
+                    // النسب المئوية (لعرض شريط التقدم)
+                    UsersPercentage = plan?.MaxUsers > 0 ? (double)currentUsers / plan.MaxUsers * 100 : 0,
+                    InvoicesPercentage = plan?.MaxInvoices > 0 ? (double)currentMonthInvoices / plan.MaxInvoices * 100 : 0,
+                    CustomersPercentage = plan?.MaxCustomers > 0 ? (double)currentCustomers / plan.MaxCustomers * 100 : 0,
+                    ProductsPercentage = plan?.MaxProducts > 0 ? (double)currentProducts / plan.MaxProducts * 100 : 0,
+                    
+                    // ميزات الخطة
+                    HasBasicReports = plan?.HasBasicReports ?? true,
+                    HasAdvancedReports = plan?.HasAdvancedReports ?? false,
+                    HasEmailSupport = plan?.HasEmailSupport ?? true,
+                    HasPrioritySupport = plan?.HasPrioritySupport ?? false,
+                    HasDedicatedManager = plan?.HasDedicatedManager ?? false,
+                    HasBackup = plan?.HasBackup ?? false,
+                    BackupFrequency = plan?.BackupFrequency,
+                    HasCustomInvoices = plan?.HasCustomInvoices ?? false,
+                    HasMultiCurrency = plan?.HasMultiCurrency ?? false,
+                    HasApiAccess = plan?.HasApiAccess ?? false,
+                    HasOfflineMode = plan?.HasOfflineMode ?? false,
+                    HasWhiteLabel = plan?.HasWhiteLabel ?? false,
+                    
+                    // معلومات الاشتراك (نرجع قيماً افتراضية)
+                    SubscriptionStart = null,
+                    SubscriptionEnd = null,
+                    SubscriptionStatus = "none",
+                    AutoRenew = false,
+                    DaysRemaining = 0
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting account usage for account {AccountId}", id);
+                return Ok(new AccountUsageDto
+                {
+                    AccountId = id,
+                    AccountName = string.Empty,
+                    PlanId = null,
+                    PlanName = "مجاني",
+                    PlanNameEn = "Free",
+                    CurrentUsers = 0,
+                    CurrentMonthInvoices = 0,
+                    CurrentCustomers = 0,
+                    CurrentProducts = 0,
+                    MaxUsers = 1,
+                    MaxInvoices = 50,
+                    MaxCustomers = 25,
+                    MaxProducts = 50,
+                    UsersPercentage = 0,
+                    InvoicesPercentage = 0,
+                    CustomersPercentage = 0,
+                    ProductsPercentage = 0,
+                    HasBasicReports = true,
+                    HasAdvancedReports = false,
+                    HasEmailSupport = true,
+                    HasPrioritySupport = false,
+                    HasDedicatedManager = false,
+                    HasBackup = false,
+                    BackupFrequency = null,
+                    HasCustomInvoices = false,
+                    HasMultiCurrency = false,
+                    HasApiAccess = false,
+                    HasOfflineMode = false,
+                    HasWhiteLabel = false,
+                    SubscriptionStart = null,
+                    SubscriptionEnd = null,
+                    SubscriptionStatus = "none",
+                    AutoRenew = false,
+                    DaysRemaining = 0
+                });
+            }
         }
     }
 
@@ -504,6 +631,7 @@ namespace SmartAccountant.API.Controllers
         public bool HasCustomInvoices { get; set; }
         public bool HasMultiCurrency { get; set; }
         public bool HasApiAccess { get; set; }
+        public bool HasOfflineMode { get; set; }
         public bool HasWhiteLabel { get; set; }
         
         // معلومات الاشتراك
@@ -527,7 +655,7 @@ namespace SmartAccountant.API.Controllers
         public int? PlanId { get; set; }
         public int UsersCount { get; set; }
         public bool IsActive { get; set; }
-        public DateTime CreatedAt { get; set; }
+        public DateTime? CreatedAt { get; set; }
         public DateTime? SubscriptionExpiry { get; set; }
         public int MaxMessageLength { get; set; }
         public int MaxNotificationLength { get; set; }

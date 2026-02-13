@@ -16,6 +16,12 @@ namespace SmartAccountant.API.Controllers
             _context = context;
         }
 
+        // Helper method to get AccountId from JWT claims
+        private int GetAccountId()
+        {
+            return int.Parse(User.FindFirst("accountId")?.Value ?? "0");
+        }
+
         /// <summary>
         /// الحصول على جميع العلامات للحساب
         /// </summary>
@@ -24,30 +30,37 @@ namespace SmartAccountant.API.Controllers
             [FromQuery] int accountId = 1,
             [FromQuery] bool? isActive = null)
         {
-            var query = _context.Tags
-                .Where(t => t.AccountId == accountId);
-
-            if (isActive.HasValue)
+            try
             {
-                query = query.Where(t => t.IsActive == isActive.Value);
-            }
+                var query = _context.Tags
+                    .Where(t => t.AccountId == accountId);
 
-            var tags = await query
-                .OrderBy(t => t.Name)
-                .Select(t => new
+                if (isActive.HasValue)
                 {
-                    t.Id,
-                    t.AccountId,
-                    t.Name,
-                    t.NameEn,
-                    t.Color,
-                    t.Description,
-                    t.IsActive,
-                    t.CreatedAt
-                })
-                .ToListAsync();
+                    query = query.Where(t => t.IsActive == isActive.Value);
+                }
 
-            return Ok(tags);
+                var tags = await query
+                    .OrderBy(t => t.Name)
+                    .Select(t => new
+                    {
+                        t.Id,
+                        t.AccountId,
+                        t.Name,
+                        t.NameEn,
+                        t.Color,
+                        t.Description,
+                        t.IsActive,
+                        t.CreatedAt
+                    })
+                    .ToListAsync();
+
+                return Ok(tags);
+            }
+            catch
+            {
+                return Ok(new List<object>());
+            }
         }
 
         /// <summary>
@@ -56,8 +69,9 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<object>> GetTag(int id)
         {
+            var accountId = GetAccountId();
             var tag = await _context.Tags
-                .Where(t => t.Id == id)
+                .Where(t => t.Id == id && t.AccountId == accountId)
                 .Select(t => new
                 {
                     t.Id,

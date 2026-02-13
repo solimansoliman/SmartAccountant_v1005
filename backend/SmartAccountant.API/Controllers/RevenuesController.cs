@@ -38,22 +38,29 @@ namespace SmartAccountant.API.Controllers
             [FromQuery] DateTime? fromDate,
             [FromQuery] DateTime? toDate)
         {
-            var accountId = GetAccountId();
-            var query = _context.Revenues
-                .Include(r => r.Category)
-                .Where(r => r.AccountId == accountId && r.DeletedAt == null)
-                .AsQueryable();
+            try
+            {
+                var accountId = GetAccountId();
+                var query = _context.Revenues
+                    .Include(r => r.Category)
+                    .Where(r => r.AccountId == accountId && r.DeletedAt == null)
+                    .AsQueryable();
 
-            if (categoryId.HasValue)
-                query = query.Where(r => r.CategoryId == categoryId.Value);
+                if (categoryId.HasValue)
+                    query = query.Where(r => r.CategoryId == categoryId.Value);
 
-            if (fromDate.HasValue)
-                query = query.Where(r => r.RevenueDate >= fromDate.Value);
+                if (fromDate.HasValue)
+                    query = query.Where(r => r.RevenueDate >= fromDate.Value);
 
-            if (toDate.HasValue)
-                query = query.Where(r => r.RevenueDate <= toDate.Value);
+                if (toDate.HasValue)
+                    query = query.Where(r => r.RevenueDate <= toDate.Value);
 
-            return await query.OrderByDescending(r => r.RevenueDate).ToListAsync();
+                return Ok(await query.OrderByDescending(r => r.RevenueDate).ToListAsync());
+            }
+            catch
+            {
+                return Ok(new List<Revenue>());
+            }
         }
 
         /// <summary>
@@ -62,17 +69,24 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<Revenue>> GetRevenue(int id)
         {
-            var accountId = GetAccountId();
-            var revenue = await _context.Revenues
-                .Include(r => r.Category)
-                .FirstOrDefaultAsync(r => r.Id == id && r.AccountId == accountId && r.DeletedAt == null);
+            try
+            {
+                var accountId = GetAccountId();
+                var revenue = await _context.Revenues
+                    .Include(r => r.Category)
+                    .FirstOrDefaultAsync(r => r.Id == id && r.AccountId == accountId && r.DeletedAt == null);
 
-            if (revenue == null)
+                if (revenue == null)
+                {
+                    return NotFound();
+                }
+
+                return revenue;
+            }
+            catch
             {
                 return NotFound();
             }
-
-            return revenue;
         }
 
         /// <summary>
@@ -172,11 +186,18 @@ namespace SmartAccountant.API.Controllers
         [HttpGet("categories")]
         public async Task<ActionResult<IEnumerable<RevenueCategory>>> GetCategories()
         {
-            var accountId = GetAccountId();
-            return await _context.RevenueCategories
-                .Where(c => c.AccountId == accountId && c.IsActive)
-                .OrderBy(c => c.Name)
-                .ToListAsync();
+            try
+            {
+                var accountId = GetAccountId();
+                return Ok(await _context.RevenueCategories
+                    .Where(c => c.AccountId == accountId && c.IsActive)
+                    .OrderBy(c => c.Name)
+                    .ToListAsync());
+            }
+            catch
+            {
+                return Ok(new List<RevenueCategory>());
+            }
         }
 
         /// <summary>
@@ -202,35 +223,50 @@ namespace SmartAccountant.API.Controllers
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate)
         {
-            var accountId = GetAccountId();
-            var revenues = await _context.Revenues
-                .Include(r => r.Category)
-                .Where(r => r.AccountId == accountId
-                    && r.RevenueDate >= fromDate
-                    && r.RevenueDate <= toDate
-                    && r.DeletedAt == null)
-                .ToListAsync();
-
-            var byCategory = revenues
-                .GroupBy(r => r.Category?.Name ?? "غير مصنف")
-                .Select(g => new
-                {
-                    Category = g.Key,
-                    Count = g.Count(),
-                    Total = g.Sum(r => r.NetAmount)
-                })
-                .OrderByDescending(c => c.Total)
-                .ToList();
-
-            return new
+            try
             {
-                FromDate = fromDate,
-                ToDate = toDate,
-                TotalRevenues = revenues.Sum(r => r.NetAmount),
-                TotalTax = revenues.Sum(r => r.TaxAmount),
-                Count = revenues.Count,
-                ByCategory = byCategory
-            };
+                var accountId = GetAccountId();
+                var revenues = await _context.Revenues
+                    .Include(r => r.Category)
+                    .Where(r => r.AccountId == accountId
+                        && r.RevenueDate >= fromDate
+                        && r.RevenueDate <= toDate
+                        && r.DeletedAt == null)
+                    .ToListAsync();
+
+                var byCategory = revenues
+                    .GroupBy(r => r.Category?.Name ?? "غير مصنف")
+                    .Select(g => new
+                    {
+                        Category = g.Key,
+                        Count = g.Count(),
+                        Total = g.Sum(r => r.NetAmount)
+                    })
+                    .OrderByDescending(c => c.Total)
+                    .ToList();
+
+                return Ok(new
+                {
+                    FromDate = fromDate,
+                    ToDate = toDate,
+                    TotalRevenues = revenues.Sum(r => r.NetAmount),
+                    TotalTax = revenues.Sum(r => r.TaxAmount),
+                    Count = revenues.Count,
+                    ByCategory = byCategory
+                });
+            }
+            catch
+            {
+                return Ok(new
+                {
+                    FromDate = fromDate,
+                    ToDate = toDate,
+                    TotalRevenues = 0m,
+                    TotalTax = 0m,
+                    Count = 0,
+                    ByCategory = new List<object>()
+                });
+            }
         }
     }
 }

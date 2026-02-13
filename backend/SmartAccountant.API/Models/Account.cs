@@ -22,7 +22,7 @@ namespace SmartAccountant.API.Models
         
         public string? TaxNumber { get; set; }
         public bool IsActive { get; set; } = true;
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? UpdatedAt { get; set; }
         
         // Subscription Info
@@ -42,6 +42,15 @@ namespace SmartAccountant.API.Models
         /// الحد الأقصى لعدد حروف الإشعار (0 = بدون حد)
         /// </summary>
         public int MaxNotificationLength { get; set; } = 500;
+
+        // GDPR Compliance
+        public DateTime? LastDataExportDate { get; set; }
+        public DateTime? ScheduledDeletionDate { get; set; }
+        public bool ConsentGiven { get; set; } = false;
+        public string? TaxId { get; set; }
+        public string? City { get; set; }
+        public string? State { get; set; }
+        public string? ZipCode { get; set; }
 
         // Navigation Properties
         public ICollection<User> Users { get; set; } = new List<User>();

@@ -26,7 +26,12 @@ export const getAccountUsage = async (accountId: number, forceRefresh = false): 
     const usage = await accountApi.getUsage(accountId);
     usageCache = { data: usage, timestamp: now };
     return usage;
-  } catch (error) {
+  } catch (error: any) {
+    // تجاهل أخطاء الصلاحيات والأخطاء 500 - المستخدم قد لا يكون لديه صلاحيات
+    if (error?.status === 403 || error?.status === 401 || error?.status === 500) {
+      console.log('Cannot fetch account usage - user may not have permissions');
+      return null;
+    }
     console.error('Error fetching account usage:', error);
     return null;
   }
@@ -131,6 +136,7 @@ export const hasFeature = async (accountId: number, feature: keyof Pick<
   AccountUsageDto,
   'hasBasicReports' | 'hasAdvancedReports' | 'hasEmailSupport' | 'hasPrioritySupport' |
   'hasDedicatedManager' | 'hasBackup' | 'hasCustomInvoices' | 'hasMultiCurrency' |
+  'hasOfflineMode' |
   'hasApiAccess' | 'hasWhiteLabel'
 >): Promise<boolean> => {
   const usage = await getAccountUsage(accountId);

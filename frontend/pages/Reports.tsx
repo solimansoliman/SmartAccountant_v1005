@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useCustomers, useProducts, useInvoices, useExpenses, useRevenues } from '../services/dataHooks';
 import { TransactionType } from '../types';
-import { Printer, Filter, FileBarChart, TrendingUp, TrendingDown, DollarSign, Calendar, Search, PieChart, ArrowDownLeft, ArrowUpRight, Download, Loader2, FileSpreadsheet, FileText, BarChart3, User, Package, X } from 'lucide-react';
+import { Printer, Filter, FileBarChart, TrendingUp, TrendingDown, DollarSign, Calendar, Search, PieChart, ArrowDownLeft, ArrowUpRight, Download, Loader2, FileSpreadsheet, FileText, BarChart3, User, Package, X, AlertTriangle } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
@@ -21,7 +21,7 @@ const Reports: React.FC = () => {
   const { products, loading: productsLoading } = useProducts();
   const { invoices, loading: invoicesLoading } = useInvoices();
   const { expenses, loading: expensesLoading } = useExpenses();
-  const { revenues, loading: revenuesLoading } = useRevenues();
+  const { revenues, loading: revenuesLoading, error: revenuesError, refresh: refreshRevenues } = useRevenues();
   
   const isLoading = customersLoading || productsLoading || invoicesLoading || expensesLoading || revenuesLoading;
   
@@ -204,83 +204,135 @@ const Reports: React.FC = () => {
 
     // --- CHART DATA ---
     const dailyData: Record<string, { income: number, expense: number }> = {};
+
+    const toSafeNumber = (value: unknown): number => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const normalizeDateKey = (value: string): string => {
+      if (!value) return '';
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString().slice(0, 10);
+      }
+      return String(value).slice(0, 10);
+    };
     
     // Helper to add data safely
     const addToDate = (date: string, inc: number, exp: number) => {
-        if (!dailyData[date]) dailyData[date] = { income: 0, expense: 0 };
-        dailyData[date].income += inc;
-        dailyData[date].expense += exp;
+        const key = normalizeDateKey(date);
+        if (!key) return;
+        if (!dailyData[key]) dailyData[key] = { income: 0, expense: 0 };
+        dailyData[key].income += toSafeNumber(inc);
+        dailyData[key].expense += toSafeNumber(exp);
     };
 
     filteredInvoices.forEach(inv => {
-        const val = selectedProductId 
+      const val = selectedProductId 
             ? inv.items.filter(i => String(i.productId) === selectedProductId).reduce((s, i) => s + i.total, 0)
-            : inv.paidAmount;
-        addToDate(inv.date, val, 0);
+        : toSafeNumber(inv.paidAmount);
+      addToDate(inv.date, toSafeNumber(val), 0);
     });
-    filteredOtherIncome.forEach(inc => addToDate(inc.expenseDate, inc.amount, 0));
-    finalFilteredExpenses.forEach(exp => addToDate(exp.expenseDate, 0, exp.totalAmount));
+    filteredOtherIncome.forEach(inc => addToDate(inc.revenueDate, toSafeNumber(inc.totalAmount ?? inc.amount), 0));
+    finalFilteredExpenses.forEach(exp => addToDate(exp.expenseDate, 0, toSafeNumber(exp.totalAmount)));
 
-    const chartData = Object.keys(dailyData).sort().map(date => ({
+    let chartData = Object.keys(dailyData).sort().map(date => ({
         date,
         income: dailyData[date].income,
         expense: dailyData[date].expense
     }));
 
+    // Keep timeline visible even when there are no operations in the selected period.
+    if (chartData.length === 0) {
+      const safeStart = normalizeDateKey(startDate);
+      const safeEnd = normalizeDateKey(endDate);
+      if (safeStart && safeEnd && safeStart !== safeEnd) {
+        chartData = [
+          { date: safeStart, income: 0, expense: 0 },
+          { date: safeEnd, income: 0, expense: 0 },
+        ];
+      } else if (safeStart || safeEnd) {
+        chartData = [{ date: safeStart || safeEnd, income: 0, expense: 0 }];
+      }
+    }
+
     // --- LEDGER ITEMS ---
-    const ledgerItems = [
+    let ledgerItems = [
         ...filteredInvoices.map(i => ({
             date: i.date, 
             type: 'فاتورة مبيعات', 
             ref: i.invoiceNumber || `#${i.id}`,
+            code: `INV-${i.id}`,
+            account: 'حساب القيم المدينة / العملاء',
             desc: `${i.customerName} (${i.type})`, 
             credit: i.paidAmount,
             debit: 0,
+            netAmount: i.paidAmount,
             totalAmount: i.totalAmount,
-            remaining: i.remainingAmount
+            remaining: i.remainingAmount,
+            runningBalance: 0
         })),
         ...finalFilteredExpenses.map(e => ({
             date: e.expenseDate, 
             type: 'مصروف', 
             ref: e.expenseNumber || '-',
+            code: `EXP-${e.id}`,
+            account: 'حساب المصروفات',
             desc: e.description, 
             credit: 0, 
             debit: e.totalAmount,
+            netAmount: -e.totalAmount,
             totalAmount: e.totalAmount,
-            remaining: 0
+            remaining: 0,
+            runningBalance: 0
         })),
         ...filteredOtherIncome.map(e => ({
-            date: e.expenseDate, 
+          date: e.revenueDate, 
             type: 'إيراد آخر', 
-            ref: e.expenseNumber || '-',
+          ref: e.revenueNumber || e.reference || '-',
+            code: `REV-${e.id}`,
+            account: 'حساب الإيرادات الأخرى',
             desc: e.description, 
-            credit: e.totalAmount, 
+          credit: e.totalAmount || e.amount || 0, 
             debit: 0,
-            totalAmount: e.totalAmount,
-            remaining: 0
+          netAmount: e.totalAmount || e.amount || 0,
+          totalAmount: e.totalAmount || e.amount || 0,
+            remaining: 0,
+            runningBalance: 0
         }))
     ].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // حساب رصيد المديونية التراكمي (Running Balance)
+    let cumulativeBalance = 0;
+    ledgerItems = ledgerItems.map(item => {
+        cumulativeBalance += item.netAmount;
+        return { ...item, runningBalance: cumulativeBalance };
+    });
 
     return { 
         totalRevenue, totalExpenses: totalExpensesVal, totalOtherIncome: totalOtherIncomeVal, 
         totalIncome, netProfit, profitMargin, chartData, ledgerItems
     };
-  }, [startDate, endDate, showReport, selectedCustomerId, selectedProductId, invoices, expenses, isLoading]);
+  }, [startDate, endDate, showReport, selectedCustomerId, selectedProductId, invoices, expenses, revenues, isLoading]);
 
   // --- EXPORT TO CSV ---
   const exportToCSV = () => {
       if (!reportData) return;
       
-      const headers = ['التاريخ', 'النوع', 'المرجع', 'الوصف', 'الإجمالي', 'المدفوع (دائن)', 'المتبقي', 'مصروف (مدين)'];
+      const headers = ['التاريخ', 'الكود', 'النوع', 'الحساب', 'البيان', 'المرجع', 'الإجمالي', 'دائن (+)', 'مدين (-)', 'المتبقي', 'رصيد المديونية التراكمي'];
       const rows = reportData.ledgerItems.map(item => [
           item.date,
+          item.code,
           item.type,
-          item.ref,
+          item.account,
           item.desc,
+          item.ref,
           item.totalAmount,
           item.credit,
+          item.debit,
           item.remaining,
-          item.debit
+          item.runningBalance
       ]);
 
       let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // BOM for Excel Arabic support
@@ -348,24 +400,30 @@ const Reports: React.FC = () => {
           <table>
             <tr>
               <th>التاريخ</th>
+              <th>الكود</th>
               <th>النوع</th>
-              <th>المرجع</th>
+              <th>الحساب</th>
               <th>الوصف</th>
+              <th>المرجع</th>
               <th>الإجمالي</th>
-              <th>دائن (مدفوع)</th>
+              <th>دائن (+)</th>
+              <th>مدين (-)</th>
               <th>المتبقي</th>
-              <th>مدين (مصروف)</th>
+              <th>رصيد المديونية التراكمي</th>
             </tr>
             ${reportData.ledgerItems.map(item => `
               <tr class="${item.debit > 0 ? 'expense' : 'income'}">
                 <td>${item.date}</td>
+                <td>${item.code}</td>
                 <td>${item.type}</td>
-                <td>${item.ref}</td>
+                <td>${item.account}</td>
                 <td>${item.desc}</td>
+                <td>${item.ref}</td>
                 <td>${item.totalAmount.toLocaleString()}</td>
-                <td>${item.credit.toLocaleString()}</td>
+                <td>${item.credit > 0 ? '+' + item.credit.toLocaleString() : '-'}</td>
+                <td>${item.debit > 0 ? '-' + item.debit.toLocaleString() : '-'}</td>
                 <td>${item.remaining.toLocaleString()}</td>
-                <td>${item.debit.toLocaleString()}</td>
+                <td>${item.runningBalance.toLocaleString()}</td>
               </tr>
             `).join('')}
           </table>
@@ -490,6 +548,24 @@ const Reports: React.FC = () => {
 
   return (
     <div className="space-y-6">
+       {revenuesError && (
+         <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm flex items-start gap-2 print:hidden">
+           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+           <div className="flex-1">
+             <p className="font-bold">تعذر جلب الإيرادات</p>
+             <p className="opacity-90">قد تكون قيم الإيرادات الأخرى غير مكتملة في هذا التقرير. اضغط تحديث التقرير بعد التأكد من الاتصال بالخادم.</p>
+           </div>
+           <button
+             onClick={() => refreshRevenues?.()}
+             disabled={revenuesLoading}
+             className="shrink-0 px-2 py-1 rounded-md border border-amber-300 bg-white text-amber-800 hover:bg-amber-100 disabled:opacity-60 disabled:cursor-not-allowed"
+             title="إعادة محاولة جلب الإيرادات"
+           >
+             {revenuesLoading ? 'جاري المحاولة...' : 'إعادة المحاولة'}
+           </button>
+         </div>
+       )}
+
        {/* --- HEADER (PRINT ONLY) --- */}
        <div className="hidden print:block pb-4 border-b-2 border-slate-800 mb-4">
            <div className="flex justify-between items-center">
@@ -755,12 +831,18 @@ const Reports: React.FC = () => {
                    </div>
                </div>
 
-               {/* Charts Visualization - يظهر في النهاية عند الطباعة */}
-               <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:break-inside-avoid print:order-3 print:mt-4 print:p-4">
+                 {/* Charts Visualization - صفحة منفصلة أخيرة عند الطباعة */}
+                 <div
+                   className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 print:border-black print:break-before-page print:break-inside-avoid print:order-3 print:mt-0 print:pt-6 print:p-4"
+                 >
                    <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800 dark:text-white print:text-black print:text-sm print:mb-2">
                        <FileBarChart size={20} className="text-slate-500 dark:text-slate-400 print:hidden"/>
                        المسار الزمني (أيام العمليات)
                    </h3>
+
+                   <p className="hidden print:block text-[10px] text-slate-600 mb-2">
+                   صفحة مستقلة للمسار الزمني
+                   </p>
                    
                    {/* Legend */}
                    <div className="flex justify-center gap-6 mb-4 text-xs dark:text-slate-400 print:text-black print:gap-4 print:mb-2 print:text-[10px]">
@@ -769,7 +851,7 @@ const Reports: React.FC = () => {
                    </div>
 
                    {/* Line Chart */}
-                   <div className="h-64 border-l border-b border-slate-200 dark:border-slate-700 pl-4 pb-4 print:border-black print:h-40 print:pl-2 print:pb-2">
+                     <div className="h-64 border-l border-b border-slate-200 dark:border-slate-700 pl-4 pb-4 print:border-black print:h-[60vh] print:pl-2 print:pb-2">
                        {renderLineChart(reportData.chartData)}
                    </div>
                </div>
@@ -862,12 +944,16 @@ const Reports: React.FC = () => {
                            <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 print:bg-gray-200 print:text-black font-bold">
                                <tr>
                                    <th className="p-3 border-b dark:border-slate-700 print:border-black print:p-1.5 print:text-[9px]">التاريخ</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black print:p-1.5 print:text-[9px]">الكود</th>
                                    <th className="p-3 border-b dark:border-slate-700 print:border-black print:p-1.5 print:text-[9px]">النوع</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black print:p-1.5 print:text-[9px]">الحساب</th>
                                    <th className="p-3 border-b dark:border-slate-700 print:border-black print:p-1.5 print:text-[9px]">البيان</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black print:p-1.5 print:text-[9px]">المرجع</th>
                                    <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-blue-700 print:text-black print:p-1.5 print:text-[9px]">الإجمالي</th>
-                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-emerald-700 print:text-black print:p-1.5 print:text-[9px]">دائن</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-emerald-700 print:text-black print:p-1.5 print:text-[9px]">دائن (+)</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-rose-700 print:text-black print:p-1.5 print:text-[9px]">مدين (-)</th>
                                    <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-amber-600 print:text-black print:p-1.5 print:text-[9px]">المتبقي</th>
-                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-rose-700 print:text-black print:p-1.5 print:text-[9px]">مدين</th>
+                                   <th className="p-3 border-b dark:border-slate-700 print:border-black text-left text-purple-700 print:text-black print:p-1.5 print:text-[9px]">رصيد المديونية التراكمي</th>
                                </tr>
                            </thead>
                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700 print:divide-gray-300 text-slate-800 dark:text-slate-200">
@@ -875,7 +961,9 @@ const Reports: React.FC = () => {
                                    .filter(item => {
                                        const matchesSearch = !ledgerSearch || 
                                            item.desc.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
-                                           item.ref.toLowerCase().includes(ledgerSearch.toLowerCase());
+                                           item.ref.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
+                                           item.code.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
+                                           item.account.toLowerCase().includes(ledgerSearch.toLowerCase());
                                        const matchesType = ledgerTypeFilter === 'all' ||
                                            (ledgerTypeFilter === 'invoices' && item.type === 'فاتورة مبيعات') ||
                                            (ledgerTypeFilter === 'expenses' && item.type === 'مصروف') ||
@@ -885,24 +973,36 @@ const Reports: React.FC = () => {
                                    .map((item, idx) => (
                                    <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-700 print:text-black">
                                        <td className="p-3 print:border-l print:border-gray-300 print:p-1 print:text-[8px]">{item.date}</td>
+                                       <td className="p-3 print:border-l print:border-gray-300 text-xs font-bold text-slate-500 dark:text-slate-400 print:p-1 print:text-[8px]">{item.code}</td>
                                        <td className="p-3 print:border-l print:border-gray-300 text-xs font-bold print:p-1 print:text-[8px]">{item.type}</td>
+                                       <td className="p-3 print:border-l print:border-gray-300 text-xs print:p-1 print:text-[8px]">
+                                           <div className="text-slate-600 dark:text-slate-400 max-w-[120px] truncate" title={item.account}>
+                                               {item.account}
+                                           </div>
+                                       </td>
                                        <td className="p-3 print:border-l print:border-gray-300 print:p-1 print:text-[8px]">
                                            <div className="flex flex-col">
-                                               <span>{item.desc}</span>
+                                               <span className="max-w-[150px] truncate">{item.desc}</span>
                                                {item.ref !== '-' && <span className="text-[10px] text-slate-400 print:text-gray-500 print:text-[7px]">{item.ref}</span>}
                                            </div>
+                                       </td>
+                                       <td className="p-3 print:border-l print:border-gray-300 text-xs text-slate-500 dark:text-slate-400 print:p-1 print:text-[8px]">
+                                           {item.ref !== '-' ? item.ref : '-'}
                                        </td>
                                        <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-blue-600 dark:text-blue-400 print:text-black print:p-1 print:text-[8px]">
                                            {item.totalAmount > 0 ? item.totalAmount.toLocaleString() : '-'}
                                        </td>
                                        <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-emerald-600 dark:text-emerald-400 print:text-black print:p-1 print:text-[8px]">
-                                           {item.credit > 0 ? item.credit.toLocaleString() : '-'}
+                                           {item.credit > 0 ? `+${item.credit.toLocaleString()}` : '-'}
+                                       </td>
+                                       <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-rose-600 dark:text-rose-400 print:text-black print:p-1 print:text-[8px]">
+                                           {item.debit > 0 ? `-${item.debit.toLocaleString()}` : '-'}
                                        </td>
                                        <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-amber-600 dark:text-amber-400 font-bold print:text-black print:p-1 print:text-[8px]">
                                            {item.remaining > 0 ? item.remaining.toLocaleString() : '-'}
                                        </td>
-                                       <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-rose-600 dark:text-rose-400 print:text-black print:p-1 print:text-[8px]">
-                                           {item.debit > 0 ? item.debit.toLocaleString() : '-'}
+                                       <td className="p-3 text-left font-mono print:border-l print:border-gray-300 text-purple-600 dark:text-purple-400 font-bold print:text-black print:p-1 print:text-[8px]">
+                                           {item.runningBalance.toLocaleString()}
                                        </td>
                                    </tr>
                                ))}
@@ -911,20 +1011,25 @@ const Reports: React.FC = () => {
                                    const filteredItems = reportData.ledgerItems.filter(item => {
                                        const matchesSearch = !ledgerSearch || 
                                            item.desc.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
-                                           item.ref.toLowerCase().includes(ledgerSearch.toLowerCase());
+                                           item.ref.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
+                                           item.code.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
+                                           item.account.toLowerCase().includes(ledgerSearch.toLowerCase());
                                        const matchesType = ledgerTypeFilter === 'all' ||
                                            (ledgerTypeFilter === 'invoices' && item.type === 'فاتورة مبيعات') ||
                                            (ledgerTypeFilter === 'expenses' && item.type === 'مصروف') ||
                                            (ledgerTypeFilter === 'income' && item.type === 'إيراد آخر');
                                        return matchesSearch && matchesType;
                                    });
+                                   const totalCredit = filteredItems.reduce((sum, item) => sum + item.credit, 0);
+                                   const totalDebit = filteredItems.reduce((sum, item) => sum + item.debit, 0);
                                    return (
                                        <tr className="bg-slate-100 dark:bg-slate-900 font-bold border-t-2 border-slate-300 dark:border-slate-600 print:border-black print:bg-gray-200">
-                                           <td colSpan={3} className="p-3 text-center print:p-1.5 print:text-[9px]">الإجماليات</td>
+                                           <td colSpan={6} className="p-3 text-center print:p-1.5 print:text-[9px]">الإجماليات</td>
                                            <td className="p-3 text-left text-blue-700 dark:text-blue-400 print:text-black print:p-1.5 print:text-[9px]">{filteredItems.reduce((sum, item) => sum + item.totalAmount, 0).toLocaleString()}</td>
-                                           <td className="p-3 text-left text-emerald-700 dark:text-emerald-400 print:text-black print:p-1.5 print:text-[9px]">{filteredItems.reduce((sum, item) => sum + item.credit, 0).toLocaleString()}</td>
+                                           <td className="p-3 text-left text-emerald-700 dark:text-emerald-400 print:text-black print:p-1.5 print:text-[9px]">+{totalCredit.toLocaleString()}</td>
+                                           <td className="p-3 text-left text-rose-700 dark:text-rose-400 print:text-black print:p-1.5 print:text-[9px]">-{totalDebit.toLocaleString()}</td>
                                            <td className="p-3 text-left text-amber-600 dark:text-amber-400 font-bold print:text-black print:p-1.5 print:text-[9px]">{filteredItems.reduce((sum, item) => sum + item.remaining, 0).toLocaleString()}</td>
-                                           <td className="p-3 text-left text-rose-700 dark:text-rose-400 print:text-black print:p-1.5 print:text-[9px]">{filteredItems.reduce((sum, item) => sum + item.debit, 0).toLocaleString()}</td>
+                                           <td className="p-3 text-left text-purple-700 dark:text-purple-400 print:text-black print:p-1.5 print:text-[9px]">{filteredItems.length > 0 ? filteredItems[filteredItems.length - 1].runningBalance.toLocaleString() : '0'}</td>
                                        </tr>
                                    );
                                })()}

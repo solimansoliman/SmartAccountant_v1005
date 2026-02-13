@@ -71,8 +71,12 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const listenersRef = useRef<Map<string, Set<() => void>>>(new Map());
 
   // Calculate offline permissions
+  const enabledByPlan = permissions.allowOfflineByPlan !== false;
+  const enabledByAdmin = permissions.allowOfflineMode !== false;
+  const effectiveOfflineEnabled = enabledByPlan && enabledByAdmin;
+
   const offlinePermissions = {
-    enabled: permissions.allowOfflineMode !== false,
+    enabled: effectiveOfflineEnabled,
     canCreate: permissions.allowOfflineCreate !== false,
     canEdit: permissions.allowOfflineEdit !== false,
     canDelete: permissions.allowOfflineDelete === true,

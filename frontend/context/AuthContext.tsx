@@ -9,6 +9,9 @@ const USER_KEY = 'smart_accountant_user';
 export interface AuthUser {
   id: string;
   parentId?: string;
+  roleIds?: number[];
+  roleNames?: string[];
+  username?: string;
   name: string;
   email: string;
   companyName: string;
@@ -46,6 +49,7 @@ interface AuthContextType {
 }
 
 interface RegisterData {
+  username: string;
   name: string;
   email: string;
   companyName: string;
@@ -66,6 +70,9 @@ export const useAuth = () => {
 // Convert API user to frontend user
 const mapApiUserToAuthUser = (apiUser: AuthUserDto, token?: string): AuthUser => ({
   id: apiUser.id.toString(),
+  roleIds: apiUser.roles.map(role => role.id),
+  roleNames: apiUser.roles.map(role => role.name || role.nameEn || '').filter(Boolean),
+  username: apiUser.username,
   name: apiUser.fullName,
   email: apiUser.email,
   companyName: apiUser.accountName,
@@ -186,8 +193,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       if (response.success) {
         const authUser = mapApiUserToAuthUser(response.user, response.token);
+        // Clear old data before setting new user to prevent account mixing
+        const oldAccountId = user?.accountId;
         setUser(authUser);
         saveSession(authUser, response.token);
+        // Broadcast account context change to reload account-scoped caches/settings
+        if (oldAccountId && oldAccountId !== authUser.accountId) {
+          console.log(`🔄 Switching accounts: ${oldAccountId} → ${authUser.accountId}`);
+        }
+        window.dispatchEvent(new CustomEvent('accountChanged', {
+          detail: {
+            oldAccountId: oldAccountId ?? null,
+            newAccountId: authUser.accountId ?? null,
+          }
+        }));
         setIsLoading(false);
         return true;
       } else {
@@ -202,7 +221,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(false);
       return false;
     }
-  }, []);
+  }, [user]);
 
   const register = useCallback(async (userData: RegisterData): Promise<boolean> => {
     setIsLoading(true);
@@ -210,7 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     try {
       const request: RegisterRequest = {
-        username: userData.email,
+        username: userData.username.trim(),
         password: userData.password,
         fullName: userData.name,
         companyName: userData.companyName,
@@ -224,7 +243,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       if (response.success) {
         // Auto login after registration
-        const loginResult = await login(userData.email, userData.password);
+        const loginResult = await login(userData.username.trim(), userData.password);
         return loginResult;
       } else {
         setError(response.message || 'فشل إنشاء الحساب');
@@ -240,9 +259,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [login]);
 
   const logout = useCallback(() => {
+    const oldAccountId = user?.accountId ?? null;
+
     setUser(null);
     clearStoredSession();
-  }, []);
+
+    // Keep cached/offline queues intact to avoid accidental data loss.
+    window.dispatchEvent(new CustomEvent('accountChanged', {
+      detail: {
+        oldAccountId,
+        newAccountId: null,
+      }
+    }));
+  }, [user?.accountId]);
 
   const clearError = useCallback(() => {
     setError(null);

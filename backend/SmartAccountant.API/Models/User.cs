@@ -43,7 +43,7 @@ namespace SmartAccountant.API.Models
         public bool IsSuperAdmin { get; set; } = false;
         
         public bool IsActive { get; set; } = true;
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? LastLoginAt { get; set; }
         public string? LastLoginIp { get; set; }
         
@@ -88,11 +88,11 @@ namespace SmartAccountant.API.Models
         public int MaxNotificationLength { get; set; } = 0;
         
         // صلاحيات المستخدم القديمة (للتوافق)
-        public bool CanManageProducts { get; set; } = true;
-        public bool CanManageCustomers { get; set; } = true;
-        public bool CanCreateInvoices { get; set; } = true;
-        public bool CanManageExpenses { get; set; } = true;
-        public bool CanViewReports { get; set; } = true;
+        public bool CanManageProducts { get; set; } = false;
+        public bool CanManageCustomers { get; set; } = false;
+        public bool CanCreateInvoices { get; set; } = false;
+        public bool CanManageExpenses { get; set; } = false;
+        public bool CanViewReports { get; set; } = false;
         public bool CanManageSettings { get; set; } = false;
         public bool CanManageUsers { get; set; } = false;
         

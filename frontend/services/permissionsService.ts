@@ -107,13 +107,14 @@ export const canDelete = (entityKey: string, moduleId: string): boolean => {
 
 /**
  * جلب صلاحيات المستخدم الحالي
- * يبحث بالترتيب: user > roles > account
+ * يبحث بالترتيب: user > roles > account > plan > default
  */
 export const getCurrentUserPermission = (
   userId: number | undefined,
   roleIds: number[] | undefined,
   accountId: number | undefined,
-  moduleId: string
+  moduleId: string,
+  planId?: number
 ): ModulePermission => {
   const matrix = getPermissionsMatrix();
   
@@ -142,8 +143,16 @@ export const getCurrentUserPermission = (
       return matrix[accountKey][moduleId];
     }
   }
+
+  // 4. رابعاً: التحقق من صلاحيات الخطة
+  if (planId) {
+    const planKey = `plan_${planId}`;
+    if (matrix[planKey]?.[moduleId]) {
+      return matrix[planKey][moduleId];
+    }
+  }
   
-  // 4. الافتراضي: كل الصلاحيات مفتوحة
+  // 5. الافتراضي: كل الصلاحيات مفتوحة
   return DEFAULT_PERMISSION;
 };
 
@@ -180,6 +189,9 @@ export const MODULE_IDS = {
   MENU_EXPENSES: 'menu_expenses',
   MENU_REPORTS: 'menu_reports',
   MENU_SETTINGS: 'menu_settings',
+  MENU_NOTIFICATIONS: 'menu_notifications',
+  MENU_MESSAGES: 'menu_messages',
+  MENU_PLANS: 'menu_plans',
   
   // التبويبات
   SETTINGS_GENERAL: 'settings_general',

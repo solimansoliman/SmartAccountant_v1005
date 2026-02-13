@@ -206,8 +206,29 @@ export interface SystemPermissions {
   
   // إعدادات تنسيق اسم الملفات للطباعة والحفظ
   fileNameFormat: string; // تنسيق اسم الملف: {app}-{company}-{customer}-{date}-{time}
+
+  // حدود الحروف لحقول العملاء
+  customerNameMaxLength: number;
+  customerAddressMaxLength: number;
+  customerNotesMaxLength: number;
+  customerPhoneMaxLength: number;
+  customerEmailMaxLength: number;
+
+  // حدود الحروف لحقول المنتجات والفواتير
+  productNameMaxLength: number;
+  productNotesMaxLength: number;
+  invoiceNotesMaxLength: number;
+
+  // حدود الحروف لحقول التسجيل
+  registerUsernameMaxLength: number;
+  registerFullNameMaxLength: number;
+  registerCompanyNameMaxLength: number;
+  registerEmailMaxLength: number;
+  registerPasswordMaxLength: number;
   
   // ==================== إعدادات وضع عدم الاتصال (Offline Mode) ====================
+  allowOfflineByPlan?: boolean;        // متاح وفقاً للباقة
+  effectiveOfflineModeEnabled?: boolean; // النتيجة النهائية (الباقة + إعداد الأدمن)
   allowOfflineMode: boolean;           // السماح بالعمل بدون اتصال
   offlineDataRetentionDays: number;    // مدة الاحتفاظ بالبيانات المحلية (بالأيام)
   autoSyncOnReconnect: boolean;        // مزامنة تلقائية عند عودة الاتصال

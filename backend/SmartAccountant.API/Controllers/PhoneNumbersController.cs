@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SmartAccountant.API.Data;
 using SmartAccountant.API.Models;
+using SmartAccountant.API.Services;
 
 namespace SmartAccountant.API.Controllers
 {
@@ -10,10 +11,23 @@ namespace SmartAccountant.API.Controllers
     public class PhoneNumbersController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly ICustomerInputLimitsService _inputLimitsService;
 
-        public PhoneNumbersController(ApplicationDbContext context)
+        public PhoneNumbersController(ApplicationDbContext context, ICustomerInputLimitsService inputLimitsService)
         {
             _context = context;
+            _inputLimitsService = inputLimitsService;
+        }
+
+        private int GetAccountId()
+        {
+            if (Request.Headers.TryGetValue("X-Account-Id", out var accountIdHeader) &&
+                int.TryParse(accountIdHeader, out var accountId))
+            {
+                return accountId;
+            }
+
+            return 1;
         }
 
         /// <summary>
@@ -85,39 +99,76 @@ namespace SmartAccountant.API.Controllers
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] PhoneNumberCreateDto dto)
         {
-            var phone = new PhoneNumber
+            try
             {
-                AccountId = dto.AccountId,
-                EntityType = dto.EntityType,
-                EntityId = dto.EntityId,
-                Phone = dto.Phone,
-                CountryCode = dto.CountryCode,
-                PhoneType = dto.PhoneType ?? "mobile",
-                Label = dto.Label,
-                IsPrimary = dto.IsPrimary,
-                IsWhatsApp = dto.IsWhatsApp,
-                IsTelegram = dto.IsTelegram,
-                Notes = dto.Notes,
-                CreatedAt = DateTime.UtcNow,
-                CreatedByUserId = dto.CreatedByUserId
-            };
+                if (dto == null)
+                    return BadRequest(new { success = false, message = "البيانات مطلوبة" });
 
-            // إذا كان أساسي، إلغاء الأساسي من الأرقام الأخرى
-            if (phone.IsPrimary)
-            {
-                var existingPrimary = await _context.PhoneNumbers
-                    .Where(p => p.EntityType == phone.EntityType && p.EntityId == phone.EntityId && p.IsPrimary)
-                    .ToListAsync();
-                    
-                foreach (var p in existingPrimary)
-                    p.IsPrimary = false;
+                var accountId = dto.AccountId > 0 ? dto.AccountId : GetAccountId();
+                var limits = await _inputLimitsService.GetLimitsAsync(accountId);
+                var phoneValue = (dto.Phone ?? string.Empty).Trim();
+
+                if (string.IsNullOrWhiteSpace(phoneValue))
+                {
+                    return BadRequest(new { success = false, message = "رقم الهاتف مطلوب" });
+                }
+
+                if (phoneValue.Length > limits.CustomerPhoneMaxLength)
+                {
+                    return BadRequest(new { success = false, message = $"رقم الهاتف يتجاوز الحد المسموح ({limits.CustomerPhoneMaxLength})" });
+                }
+
+                var phone = new PhoneNumber
+                {
+                    AccountId = accountId,
+                    EntityType = dto.EntityType ?? "Customer",
+                    EntityId = dto.EntityId,
+                    Phone = phoneValue,
+                    CountryCode = dto.CountryCode,
+                    PhoneType = dto.PhoneType ?? "mobile",
+                    Label = dto.Label,
+                    IsPrimary = dto.IsPrimary,
+                    IsWhatsApp = dto.IsWhatsApp,
+                    IsTelegram = dto.IsTelegram,
+                    Notes = dto.Notes,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedByUserId = dto.CreatedByUserId
+                };
+
+                // إذا كان أساسي، إلغاء الأساسي من الأرقام الأخرى
+                if (phone.IsPrimary && !string.IsNullOrEmpty(phone.EntityType))
+                {
+                    var existingPrimary = await _context.PhoneNumbers
+                        .Where(p => p.EntityType == phone.EntityType && p.EntityId == phone.EntityId && p.IsPrimary)
+                        .ToListAsync();
+                        
+                    foreach (var p in existingPrimary)
+                        p.IsPrimary = false;
+                }
+
+                _context.PhoneNumbers.Add(phone);
+                await _context.SaveChangesAsync();
+
+                return CreatedAtAction(nameof(GetById), new { id = phone.Id }, 
+                    new { success = true, message = "تم إضافة رقم الهاتف بنجاح", data = phone });
             }
-
-            _context.PhoneNumbers.Add(phone);
-            await _context.SaveChangesAsync();
-
-            return CreatedAtAction(nameof(GetById), new { id = phone.Id }, 
-                new { success = true, message = "تم إضافة رقم الهاتف بنجاح", data = phone });
+            catch (ArgumentNullException ex)
+            {
+                return BadRequest(new { success = false, message = $"قيمة مفقودة: {ex.ParamName}" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { success = false, message = "عملية غير صحيحة: " + ex.Message });
+            }
+            catch (DbUpdateException ex)
+            {
+                return StatusCode(500, new { success = false, message = "خطأ في قاعدة البيانات: " + ex.InnerException?.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "خطأ غير متوقع: " + ex.Message });
+            }
         }
 
         /// <summary>
@@ -130,7 +181,24 @@ namespace SmartAccountant.API.Controllers
             if (phone == null)
                 return NotFound(new { success = false, message = "رقم الهاتف غير موجود" });
 
-            phone.Phone = dto.Phone ?? phone.Phone;
+            if (dto.Phone != null)
+            {
+                var limits = await _inputLimitsService.GetLimitsAsync(phone.AccountId);
+                var phoneValue = dto.Phone.Trim();
+
+                if (string.IsNullOrWhiteSpace(phoneValue))
+                {
+                    return BadRequest(new { success = false, message = "رقم الهاتف مطلوب" });
+                }
+
+                if (phoneValue.Length > limits.CustomerPhoneMaxLength)
+                {
+                    return BadRequest(new { success = false, message = $"رقم الهاتف يتجاوز الحد المسموح ({limits.CustomerPhoneMaxLength})" });
+                }
+
+                phone.Phone = phoneValue;
+            }
+
             phone.CountryCode = dto.CountryCode ?? phone.CountryCode;
             phone.PhoneType = dto.PhoneType ?? phone.PhoneType;
             phone.Label = dto.Label ?? phone.Label;
@@ -177,15 +245,15 @@ namespace SmartAccountant.API.Controllers
     public class PhoneNumberCreateDto
     {
         public int AccountId { get; set; }
-        public string EntityType { get; set; } = string.Empty;
+        public string EntityType { get; set; } = "Customer";
         public int EntityId { get; set; }
         public string Phone { get; set; } = string.Empty;
         public string? CountryCode { get; set; }
-        public string? PhoneType { get; set; }
+        public string? PhoneType { get; set; } = "mobile";
         public string? Label { get; set; }
-        public bool IsPrimary { get; set; }
-        public bool IsWhatsApp { get; set; }
-        public bool IsTelegram { get; set; }
+        public bool IsPrimary { get; set; } = false;
+        public bool IsWhatsApp { get; set; } = false;
+        public bool IsTelegram { get; set; } = false;
         public string? Notes { get; set; }
         public int? CreatedByUserId { get; set; }
     }

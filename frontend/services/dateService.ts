@@ -9,6 +9,63 @@ type DateFormatType = 'DD-MM-YYYY' | 'MM-DD-YYYY' | 'YYYY-MM-DD';
 type TimeFormatType = '24h' | '12h';
 type DateDisplayStyleType = 'numeric' | 'arabic';
 
+const parseDateValue = (input: string | Date): Date | null => {
+  if (input instanceof Date) {
+    return isNaN(input.getTime()) ? null : input;
+  }
+
+  const raw = String(input || '').trim();
+  if (!raw) return null;
+
+  const cleaned = raw.replace(/[\u200E\u200F]/g, '').replace(/\s+/g, ' ').trim();
+
+  const directDate = new Date(cleaned);
+  if (!isNaN(directDate.getTime())) {
+    return directDate;
+  }
+
+  const ymdMatch = cleaned.match(/(\d{4})-(\d{2})-(\d{2})/);
+  const dmyMatch = cleaned.match(/(\d{2})-(\d{2})-(\d{4})/);
+
+  let year = 0;
+  let month = 0;
+  let day = 0;
+
+  if (ymdMatch) {
+    year = Number(ymdMatch[1]);
+    month = Number(ymdMatch[2]);
+    day = Number(ymdMatch[3]);
+  } else if (dmyMatch) {
+    day = Number(dmyMatch[1]);
+    month = Number(dmyMatch[2]);
+    year = Number(dmyMatch[3]);
+  } else {
+    return null;
+  }
+
+  let hours = 0;
+  let minutes = 0;
+
+  const timeWithMeridiemMatch = cleaned.match(/(\d{1,2}):(\d{2})\s*(am|pm|AM|PM|ص|م)/);
+  if (timeWithMeridiemMatch) {
+    let parsedHours = Number(timeWithMeridiemMatch[1]);
+    minutes = Number(timeWithMeridiemMatch[2]);
+    const meridiem = timeWithMeridiemMatch[3].toLowerCase();
+    if ((meridiem === 'pm' || meridiem === 'م') && parsedHours < 12) parsedHours += 12;
+    if ((meridiem === 'am' || meridiem === 'ص') && parsedHours === 12) parsedHours = 0;
+    hours = parsedHours;
+  } else {
+    const timeMatch = cleaned.match(/(\d{1,2}):(\d{2})/);
+    if (timeMatch) {
+      hours = Number(timeMatch[1]);
+      minutes = Number(timeMatch[2]);
+    }
+  }
+
+  const parsedDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
+  return isNaN(parsedDate.getTime()) ? null : parsedDate;
+};
+
 // الحصول على إعدادات التنسيق الحالية
 const getDateFormatSettings = (): { dateFormat: DateFormatType; timeFormat: TimeFormatType; dateDisplayStyle: DateDisplayStyleType } => {
   try {
@@ -80,8 +137,8 @@ export const formatDateTime = (dateString: string | Date | null | undefined, inc
   if (!dateString) return '-';
   
   try {
-    const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
-    if (isNaN(date.getTime())) return String(dateString);
+    const date = parseDateValue(dateString);
+    if (!date) return String(dateString);
     
     const { dateFormat, timeFormat, dateDisplayStyle } = getDateFormatSettings();
     
@@ -119,8 +176,8 @@ export const formatTime = (dateString: string | Date | null | undefined): string
   if (!dateString) return '-';
   
   try {
-    const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
-    if (isNaN(date.getTime())) return String(dateString);
+    const date = parseDateValue(dateString);
+    if (!date) return String(dateString);
     
     const { timeFormat } = getDateFormatSettings();
     return formatTimeBySettings(date, timeFormat);

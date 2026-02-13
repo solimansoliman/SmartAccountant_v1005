@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using SmartAccountant.API.Data;
 using SmartAccountant.API.Models;
@@ -10,6 +11,7 @@ namespace SmartAccountant.API.Controllers
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
+    [AllowAnonymous]
     public class PlansController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -29,6 +31,7 @@ namespace SmartAccountant.API.Controllers
         {
             try
             {
+                // Get raw data first
                 var query = _context.Plans.AsQueryable();
                 
                 if (!includeInactive)
@@ -36,17 +39,21 @@ namespace SmartAccountant.API.Controllers
                     query = query.Where(p => p.IsActive);
                 }
                 
-                var plans = await query
+                var rawPlans = await query
                     .OrderBy(p => p.SortOrder)
-                    .Select(p => MapToDto(p))
                     .ToListAsync();
+
+                _logger.LogInformation("Found {PlanCount} plans from database", rawPlans.Count);
+
+                // Map to DTOs
+                var plans = rawPlans.Select(p => MapToDto(p)).ToList();
 
                 return Ok(plans);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting plans");
-                return StatusCode(500, new { message = "حدث خطأ أثناء جلب الخطط" });
+                _logger.LogError(ex, "Error getting plans: {Message}", ex.Message);
+                return StatusCode(500, new { error = ex.Message, success = false });
             }
         }
 
@@ -108,6 +115,7 @@ namespace SmartAccountant.API.Controllers
                     HasCustomInvoices = dto.HasCustomInvoices,
                     HasMultiCurrency = dto.HasMultiCurrency,
                     HasApiAccess = dto.HasApiAccess,
+                    HasOfflineMode = dto.HasOfflineMode,
                     HasWhiteLabel = dto.HasWhiteLabel,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
@@ -167,6 +175,7 @@ namespace SmartAccountant.API.Controllers
                 if (dto.HasCustomInvoices.HasValue) plan.HasCustomInvoices = dto.HasCustomInvoices.Value;
                 if (dto.HasMultiCurrency.HasValue) plan.HasMultiCurrency = dto.HasMultiCurrency.Value;
                 if (dto.HasApiAccess.HasValue) plan.HasApiAccess = dto.HasApiAccess.Value;
+                if (dto.HasOfflineMode.HasValue) plan.HasOfflineMode = dto.HasOfflineMode.Value;
                 if (dto.HasWhiteLabel.HasValue) plan.HasWhiteLabel = dto.HasWhiteLabel.Value;
 
                 plan.UpdatedAt = DateTime.UtcNow;
@@ -280,6 +289,7 @@ namespace SmartAccountant.API.Controllers
                 HasCustomInvoices = p.HasCustomInvoices,
                 HasMultiCurrency = p.HasMultiCurrency,
                 HasApiAccess = p.HasApiAccess,
+                HasOfflineMode = p.HasOfflineMode,
                 HasWhiteLabel = p.HasWhiteLabel,
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt
@@ -316,9 +326,10 @@ namespace SmartAccountant.API.Controllers
         public bool HasCustomInvoices { get; set; }
         public bool HasMultiCurrency { get; set; }
         public bool HasApiAccess { get; set; }
+        public bool HasOfflineMode { get; set; }
         public bool HasWhiteLabel { get; set; }
         public DateTime CreatedAt { get; set; }
-        public DateTime UpdatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
     }
 
     public class CreatePlanDto
@@ -348,6 +359,7 @@ namespace SmartAccountant.API.Controllers
         public bool HasCustomInvoices { get; set; }
         public bool HasMultiCurrency { get; set; }
         public bool HasApiAccess { get; set; }
+        public bool HasOfflineMode { get; set; }
         public bool HasWhiteLabel { get; set; }
     }
 
@@ -378,6 +390,7 @@ namespace SmartAccountant.API.Controllers
         public bool? HasCustomInvoices { get; set; }
         public bool? HasMultiCurrency { get; set; }
         public bool? HasApiAccess { get; set; }
+        public bool? HasOfflineMode { get; set; }
         public bool? HasWhiteLabel { get; set; }
     }
 }
