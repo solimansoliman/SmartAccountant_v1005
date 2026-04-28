@@ -1,6 +1,10 @@
 {
   "version": 2,
+<<<<<<< HEAD
   "dgSpecHash": "PjIag02Hcwo=",
+=======
+  "dgSpecHash": "e/0enMHOU44=",
+>>>>>>> 14ff4ac26dd72e893e5372f8f9e25b6bf0bd3395
   "success": true,
   "projectFilePath": "C:\\MO\\ai_proj\\SmartAccountant_v1005\\backend\\SmartAccountant.API\\SmartAccountant.API.csproj",
   "expectedPackageFiles": [
